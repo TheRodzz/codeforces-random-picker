@@ -1,15 +1,15 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import requests
-import random
-import webbrowser
 from threading import Thread
+import webbrowser
+from datetime import datetime
 
 class CodeforcesGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Codeforces Problem Finder")
-        self.root.geometry("600x400")
+        self.root.geometry("1000x600")
         self.root.configure(padx=20, pady=20)
 
         # Style configuration
@@ -21,40 +21,85 @@ class CodeforcesGUI:
         # Header
         header = ttk.Label(
             root, 
-            text="Codeforces Random Problem Finder", 
+            text="Codeforces Problem Finder", 
             style='Header.TLabel'
         )
         header.pack(pady=10)
 
-        # Rating frame
-        rating_frame = ttk.Frame(root)
-        rating_frame.pack(fill='x', pady=10)
+        # Settings frame
+        settings_frame = ttk.Frame(root)
+        settings_frame.pack(fill='x', pady=10)
 
-        ttk.Label(
-            rating_frame, 
-            text="Problem Rating:"
-        ).pack(side='left', padx=5)
+        # Rating range frame
+        rating_frame = ttk.LabelFrame(settings_frame, text="Rating Range")
+        rating_frame.pack(side='left', padx=10, fill='x', expand=True)
 
-        # Create rating dropdown with common Codeforces ratings
+        # Rating range inputs
         self.ratings = [800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 
                        1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 
                        2400, 2500, 2600, 2700, 2800, 2900, 3000, 3100, 
                        3200, 3300, 3400, 3500]
-        
-        self.rating_var = tk.StringVar(value="1400")
-        rating_dropdown = ttk.Combobox(
-            rating_frame, 
-            textvariable=self.rating_var,
+
+        ttk.Label(rating_frame, text="From:").pack(side='left', padx=5)
+        self.rating_from = ttk.Combobox(
+            rating_frame,
             values=self.ratings,
-            width=10
+            width=8
         )
-        rating_dropdown.pack(side='left', padx=5)
+        self.rating_from.set("800")
+        self.rating_from.pack(side='left', padx=5)
+
+        ttk.Label(rating_frame, text="To:").pack(side='left', padx=5)
+        self.rating_to = ttk.Combobox(
+            rating_frame,
+            values=self.ratings,
+            width=8
+        )
+        self.rating_to.set("3500")
+        self.rating_to.pack(side='left', padx=5)
+
+        # Sort options frame
+        sort_frame = ttk.LabelFrame(settings_frame, text="Sort By")
+        sort_frame.pack(side='left', padx=10, fill='x', expand=True)
+
+        self.sort_var = tk.StringVar(value="rating")
+        sort_options = [
+            ("Rating", "rating"),
+            ("Contest ID", "contestId"),
+            ("Solved Count", "solvedCount"),
+            ("Difficulty", "rating")
+        ]
+
+        for text, value in sort_options:
+            ttk.Radiobutton(
+                sort_frame,
+                text=text,
+                value=value,
+                variable=self.sort_var
+            ).pack(side='left', padx=5)
+
+        # Order direction
+        self.order_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            sort_frame,
+            text="Ascending",
+            variable=self.order_var
+        ).pack(side='left', padx=5)
+
+        # Show tags checkbox
+        self.show_tags_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            settings_frame,
+            text="Show Tags",
+            variable=self.show_tags_var,
+            command=self.update_problems_display
+        ).pack(side='left', padx=10)
 
         # Find button
         self.find_button = ttk.Button(
             root,
-            text="Find Problem",
-            command=self.find_problem_thread
+            text="Find Problems",
+            command=self.find_problems_thread
         )
         self.find_button.pack(pady=10)
 
@@ -66,41 +111,44 @@ class CodeforcesGUI:
         )
         self.progress.pack(pady=10)
 
-        # Result frame
-        self.result_frame = ttk.Frame(root)
-        self.result_frame.pack(fill='both', expand=True, pady=10)
+        # Create Treeview for problems
+        self.create_problem_tree()
 
-        # Problem details
-        self.problem_name = ttk.Label(
-            self.result_frame,
-            text="",
-            wraplength=500
-        )
-        self.problem_name.pack(pady=5)
+        # Store problems data
+        self.problems_data = []
 
-        self.problem_rating = ttk.Label(
-            self.result_frame,
-            text=""
-        )
-        self.problem_rating.pack(pady=5)
+    def create_problem_tree(self):
+        """Create and configure the Treeview for displaying problems."""
+        columns = ('name', 'rating', 'solved_count', 'tags')
+        self.tree = ttk.Treeview(self.root, columns=columns, show='headings')
+        
+        # Configure columns
+        self.tree.heading('name', text='Problem Name', command=lambda: self.sort_problems('name'))
+        self.tree.heading('rating', text='Rating', command=lambda: self.sort_problems('rating'))
+        self.tree.heading('solved_count', text='Solved Count', command=lambda: self.sort_problems('solvedCount'))
+        self.tree.heading('tags', text='Tags', command=lambda: self.sort_problems('tags'))
 
-        self.problem_tags = ttk.Label(
-            self.result_frame,
-            text="",
-            wraplength=500
-        )
-        self.problem_tags.pack(pady=5)
+        # Set column widths
+        self.tree.column('name', width=300)
+        self.tree.column('rating', width=100)
+        self.tree.column('solved_count', width=100)
+        self.tree.column('tags', width=400)
 
-        # Open in browser button (initially hidden)
-        self.open_button = ttk.Button(
-            self.result_frame,
-            text="Open in Browser",
-            command=self.open_in_browser
-        )
-        self.current_url = None
+        # Add scrollbars
+        scrollbar_y = ttk.Scrollbar(self.root, orient='vertical', command=self.tree.yview)
+        scrollbar_x = ttk.Scrollbar(self.root, orient='horizontal', command=self.tree.xview)
+        self.tree.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
 
-    def get_random_problem(self, rating):
-        """Fetch a random Codeforces problem with the specified rating."""
+        # Pack everything
+        scrollbar_y.pack(side='right', fill='y')
+        scrollbar_x.pack(side='bottom', fill='x')
+        self.tree.pack(fill='both', expand=True)
+
+        # Bind double-click event
+        self.tree.bind('<Double-1>', self.open_problem)
+
+    def get_problems(self, rating_from, rating_to):
+        """Fetch problems from Codeforces API within rating range."""
         try:
             response = requests.get("https://codeforces.com/api/problemset.problems")
             if response.status_code != 200:
@@ -111,64 +159,90 @@ class CodeforcesGUI:
                 return "Error: API request failed"
             
             problems = data["result"]["problems"]
-            matching_problems = [p for p in problems if p.get("rating") == rating]
-            
-            if not matching_problems:
-                return f"No problems found with rating {rating}"
-            
-            problem = random.choice(matching_problems)
-            problem_url = f"https://codeforces.com/problemset/problem/{problem['contestId']}/{problem['index']}"
-            
-            return {
-                "name": problem["name"],
-                "rating": problem["rating"],
-                "url": problem_url,
-                "tags": problem.get("tags", [])
+            statistics = data["result"]["problemStatistics"]
+
+            # Create solved count dictionary
+            solved_counts = {
+                f"{stat['contestId']},{stat['index']}": stat.get('solvedCount', 0)
+                for stat in statistics
             }
+
+            # Filter problems by rating range
+            matching_problems = [
+                {**p, 'solvedCount': solved_counts.get(f"{p['contestId']},{p['index']}", 0)}
+                for p in problems
+                if p.get('rating') is not None 
+                and rating_from <= p['rating'] <= rating_to
+            ]
+            
+            return matching_problems
             
         except requests.exceptions.RequestException:
             return "Error: Network error occurred"
         except (KeyError, ValueError):
             return "Error: Invalid response format from API"
 
-    def find_problem_thread(self):
-        """Start a new thread to fetch the problem."""
+    def find_problems_thread(self):
+        """Start a new thread to fetch problems."""
         self.find_button.config(state='disabled')
         self.progress.start()
-        Thread(target=self.find_problem).start()
+        Thread(target=self.find_problems).start()
 
-    def find_problem(self):
-        """Fetch and display a random problem."""
+    def find_problems(self):
+        """Fetch and display problems."""
         try:
-            rating = int(self.rating_var.get())
-            result = self.get_random_problem(rating)
+            rating_from = int(self.rating_from.get())
+            rating_to = int(self.rating_to.get())
+            
+            if rating_from > rating_to:
+                self.show_error("'From' rating must be less than or equal to 'To' rating")
+                return
+                
+            result = self.get_problems(rating_from, rating_to)
             
             if isinstance(result, str):
                 self.show_error(result)
             else:
-                self.display_problem(result)
+                self.problems_data = result
+                self.update_problems_display()
                 
         except ValueError:
-            self.show_error("Please enter a valid rating")
+            self.show_error("Please enter valid ratings")
         finally:
             self.root.after(0, self.cleanup_after_search)
 
-    def display_problem(self, problem):
-        """Display the problem details in the GUI."""
-        def update_ui():
-            self.problem_name.config(
-                text=f"Problem: {problem['name']}"
-            )
-            self.problem_rating.config(
-                text=f"Rating: {problem['rating']}"
-            )
-            self.problem_tags.config(
-                text=f"Tags: {', '.join(problem['tags'])}"
-            )
-            self.current_url = problem['url']
-            self.open_button.pack(pady=10)
+    def update_problems_display(self):
+        """Update the problems displayed in the Treeview."""
+        # Clear existing items
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        # Sort problems
+        sort_key = self.sort_var.get()
+        reverse = not self.order_var.get()
         
-        self.root.after(0, update_ui)
+        sorted_problems = sorted(
+            self.problems_data,
+            key=lambda x: (x.get(sort_key, 0) if sort_key != 'name' else x['name']),
+            reverse=reverse
+        )
+
+        # Add problems to treeview
+        for problem in sorted_problems:
+            tags = ', '.join(problem['tags']) if self.show_tags_var.get() else ''
+            self.tree.insert('', 'end', values=(
+                problem['name'],
+                problem['rating'],
+                problem.get('solvedCount', 'N/A'),
+                tags
+            ), tags=(str(problem['contestId']), problem['index']))
+
+    def open_problem(self, event):
+        """Open the selected problem in web browser."""
+        selected_item = self.tree.selection()[0]
+        contest_id, index = self.tree.item(selected_item)['tags']
+        url = f"https://codeforces.com/problemset/problem/{contest_id}/{index}"
+        webbrowser.open(url)
 
     def cleanup_after_search(self):
         """Reset UI elements after search completes."""
@@ -178,11 +252,6 @@ class CodeforcesGUI:
     def show_error(self, message):
         """Display error message."""
         messagebox.showerror("Error", message)
-
-    def open_in_browser(self):
-        """Open the problem in default web browser."""
-        if self.current_url:
-            webbrowser.open(self.current_url)
 
 def main():
     root = tk.Tk()

@@ -4,12 +4,13 @@ import requests
 from threading import Thread
 import webbrowser
 from datetime import datetime
+import random
 
 class CodeforcesGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Codeforces Problem Finder")
-        self.root.geometry("1000x600")
+        self.root.geometry("1000x800")
         self.root.configure(padx=20, pady=20)
 
         # Style configuration
@@ -26,24 +27,13 @@ class CodeforcesGUI:
         )
         header.pack(pady=10)
 
+
         # Settings frame
-        settings_frame = ttk.Frame(root)
-        settings_frame.pack(fill='x', pady=10)
-
-        # Username frame
-        username_frame = ttk.LabelFrame(settings_frame, text="Username")
-        username_frame.pack(side='left', padx=10, fill='x', expand=True)
-
-        self.username_var = tk.StringVar()
-        self.username_entry = ttk.Entry(
-            username_frame,
-            textvariable=self.username_var,
-            width=20
-        )
-        self.username_entry.pack(side='left', padx=5)
+        self.settings_frame = ttk.Frame(root)
+        self.settings_frame.pack(fill='x', pady=10)
 
         # Rating range frame
-        rating_frame = ttk.LabelFrame(settings_frame, text="Rating Range")
+        rating_frame = ttk.LabelFrame(self.settings_frame, text="Rating Range")
         rating_frame.pack(side='left', padx=10, fill='x', expand=True)
 
         # Rating range inputs
@@ -71,7 +61,7 @@ class CodeforcesGUI:
         self.rating_to.pack(side='left', padx=5)
 
         # Sort options frame
-        sort_frame = ttk.LabelFrame(settings_frame, text="Sort By")
+        sort_frame = ttk.LabelFrame(self.settings_frame, text="Sort By")
         sort_frame.pack(side='left', padx=10, fill='x', expand=True)
 
         self.sort_var = tk.StringVar(value="rating")
@@ -101,7 +91,7 @@ class CodeforcesGUI:
         # Show tags checkbox
         self.show_tags_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            settings_frame,
+            self.settings_frame,
             text="Show Tags",
             variable=self.show_tags_var,
             command=self.update_problems_display
@@ -130,6 +120,26 @@ class CodeforcesGUI:
         self.problems_data = []
         self.solved_problems = set()
 
+        # Random button (moved to bottom)
+        self.random_button = ttk.Button(
+            root,
+            text="Pick Random Problem",
+            command=self.pick_random_problem
+        )
+        self.random_button.pack(pady=10)
+        from codeforces_enhancements import CodeforcesEnhancements
+        self.enhancements = CodeforcesEnhancements(self)
+        
+    def pick_random_problem(self):
+        """Pick a random problem from the displayed list and open it."""
+        if self.problems_data:
+            random_problem = random.choice(self.problems_data)
+            contest_id = random_problem['contestId']
+            index = random_problem['index']
+            url = f"https://codeforces.com/problemset/problem/{contest_id}/{index}"
+            webbrowser.open(url)
+        else:
+            self.show_error("No problems found. Please perform a search first.")
     def create_problem_tree(self):
         """Create and configure the Treeview for displaying problems."""
         columns = ('name', 'rating', 'solved_count', 'tags')
@@ -237,6 +247,8 @@ class CodeforcesGUI:
                     self.show_error(solved_result)
                     return
                 self.solved_problems = solved_result
+                if hasattr(self, 'enhancements'):
+                    self.enhancements.update_user_profile()
             else:
                 self.solved_problems = set()
 
@@ -255,11 +267,18 @@ class CodeforcesGUI:
                 self.problems_data = result
                 self.update_problems_display()
                 
+                if hasattr(self, 'enhancements'):
+                    self.enhancements.update_difficulty_histogram()
+                
         except ValueError:
             self.show_error("Please enter valid ratings")
         finally:
             self.root.after(0, self.cleanup_after_search)
-
+            
+    def show_info(self, message):
+        """Display info message."""
+        messagebox.showinfo("Information", message)
+        
     def update_problems_display(self):
         """Update the problems displayed in the Treeview."""
         # Clear existing items
@@ -297,6 +316,10 @@ class CodeforcesGUI:
         """Reset UI elements after search completes."""
         self.find_button.config(state='normal')
         self.progress.stop()
+
+    def show_info(self, message):
+        """Display info message."""
+        messagebox.showinfo("Information", message)
 
     def show_error(self, message):
         """Display error message."""

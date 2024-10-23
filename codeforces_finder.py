@@ -5,6 +5,9 @@ from threading import Thread
 import webbrowser
 from datetime import datetime
 import random
+import subprocess
+import sys
+import os
 
 class CodeforcesGUI:
     def __init__(self, root):
@@ -162,13 +165,139 @@ class CodeforcesGUI:
         scrollbar_x = ttk.Scrollbar(self.root, orient='horizontal', command=self.tree.xview)
         self.tree.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
 
+        # Create a frame for browser buttons
+        browser_frame = ttk.Frame(self.root)
+        
+        # Create browser-specific buttons
+        firefox_button = ttk.Button(
+            browser_frame,
+            text="Open in Firefox",
+            command=lambda: self.open_problem_in_browser('firefox')
+        )
+        chrome_button = ttk.Button(
+            browser_frame,
+            text="Open in Chrome",
+            command=lambda: self.open_problem_in_browser('chrome')
+        )
+
+        # Pack browser buttons
+        firefox_button.pack(side='left', padx=5)
+        chrome_button.pack(side='left', padx=5)
+
         # Pack everything
         scrollbar_y.pack(side='right', fill='y')
         scrollbar_x.pack(side='bottom', fill='x')
         self.tree.pack(fill='both', expand=True)
+        browser_frame.pack(pady=10)
+    def get_browser_path(self, browser):
+        """Get the path to the browser executable based on the operating system."""
+        if sys.platform.startswith('win'):  # Windows
+            if browser == 'chrome':
+                paths = [
+                    os.path.join(os.environ.get('PROGRAMFILES', ''), 'Google/Chrome/Application/chrome.exe'),
+                    os.path.join(os.environ.get('PROGRAMFILES(X86)', ''), 'Google/Chrome/Application/chrome.exe')
+                ]
+            else:  # firefox
+                paths = [
+                    os.path.join(os.environ.get('PROGRAMFILES', ''), 'Mozilla Firefox/firefox.exe'),
+                    os.path.join(os.environ.get('PROGRAMFILES(X86)', ''), 'Mozilla Firefox/firefox.exe')
+                ]
+        elif sys.platform.startswith('darwin'):  # macOS
+            if browser == 'chrome':
+                paths = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
+            else:  # firefox
+                paths = ['/Applications/Firefox.app/Contents/MacOS/firefox']
+        else:  # Linux
+            if browser == 'chrome':
+                paths = ['google-chrome', 'google-chrome-stable']
+            else:  # firefox
+                paths = ['firefox']
 
-        # Bind double-click event
-        self.tree.bind('<Double-1>', self.open_problem)
+        # For Linux, try to find the browser in PATH
+        if not sys.platform.startswith('win') and not sys.platform.startswith('darwin'):
+            for path in paths:
+                try:
+                    return subprocess.check_output(['which', path]).decode().strip()
+                except subprocess.CalledProcessError:
+                    continue
+
+        # For Windows and macOS, check if the paths exist
+        else:
+            for path in paths:
+                if os.path.exists(path):
+                    return path
+
+        return None
+    
+    def open_problem_in_browser(self, browser):
+        """Open the selected problem in the specified browser."""
+        selected_items = self.tree.selection()
+        if not selected_items:
+            self.show_error("Please select a problem first")
+            return
+
+        selected_item = selected_items[0]
+        contest_id, index = self.tree.item(selected_item)['tags']
+        url = f"https://codeforces.com/problemset/problem/{contest_id}/{index}"
+
+        browser_path = self.get_browser_path(browser)
+        if browser_path:
+            try:
+                if sys.platform.startswith('win'):
+                    subprocess.Popen([browser_path, url])
+                else:
+                    subprocess.Popen([browser_path, '-new-tab', url])
+            except subprocess.SubprocessError:
+                self.show_error(f"Failed to open {browser}. Using default browser instead.")
+                webbrowser.open(url)
+        else:
+            self.show_error(f"{browser.title()} not found. Using default browser instead.")
+            webbrowser.open(url)
+
+    def pick_random_problem(self):
+        """Pick a random problem from the displayed list and open it."""
+        if self.problems_data:
+            random_problem = random.choice(self.problems_data)
+            contest_id = random_problem['contestId']
+            index = random_problem['index']
+            url = f"https://codeforces.com/problemset/problem/{contest_id}/{index}"
+            
+            # Show a dialog to choose the browser
+            dialog = tk.Toplevel(self.root)
+            dialog.title("Choose Browser")
+            dialog.geometry("200x100")
+            dialog.transient(self.root)
+            
+            ttk.Button(
+                dialog,
+                text="Open in Firefox",
+                command=lambda: self.open_random_problem(url, 'firefox', dialog)
+            ).pack(pady=5)
+            
+            ttk.Button(
+                dialog,
+                text="Open in Chrome",
+                command=lambda: self.open_random_problem(url, 'chrome', dialog)
+            ).pack(pady=5)
+        else:
+            self.show_error("No problems found. Please perform a search first.")
+
+    def open_random_problem(self, url, browser, dialog):
+        """Open the random problem in the specified browser and close the dialog."""
+        browser_path = self.get_browser_path(browser)
+        if browser_path:
+            try:
+                if sys.platform.startswith('win'):
+                    subprocess.Popen([browser_path, url])
+                else:
+                    subprocess.Popen([browser_path, '-new-tab', url])
+            except subprocess.SubprocessError:
+                self.show_error(f"Failed to open {browser}. Using default browser instead.")
+                webbrowser.open(url)
+        else:
+            self.show_error(f"{browser.title()} not found. Using default browser instead.")
+            webbrowser.open(url)
+        dialog.destroy()
 
     def get_user_solved_problems(self, username):
         """Fetch solved problems for a given username."""

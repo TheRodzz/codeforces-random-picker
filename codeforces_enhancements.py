@@ -217,6 +217,3 @@ class CodeforcesEnhancements:
 def show_info(self, message):
     """Display info message."""
     messagebox.showinfo("Information", message)
-
-# Add the show_info method to the main app class
-# CodeforcesGUI.show_info = show_info

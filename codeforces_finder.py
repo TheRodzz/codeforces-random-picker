@@ -1,463 +1,301 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
-import requests
-from threading import Thread
-import webbrowser
-from datetime import datetime
-import random
-import subprocess
 import sys
 import os
+import json
+import random
+import requests
+import webbrowser
+from datetime import datetime, timedelta
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                           QHBoxLayout, QLabel, QLineEdit, QPushButton, 
+                           QSpinBox, QTableWidget, QTableWidgetItem, QComboBox,
+                           QHeaderView, QStyle, QStyleFactory, QCheckBox)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtGui import QPalette, QColor
 
-class CodeforcesGUI:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Codeforces Problem Finder")
-        self.root.geometry("1000x800")
-        self.root.configure(padx=20, pady=20)
+class DataFetcher(QThread):
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
 
-        # Style configuration
-        style = ttk.Style()
-        style.configure('TButton', padding=5)
-        style.configure('TLabel', padding=5)
-        style.configure('Header.TLabel', font=('Helvetica', 16, 'bold'))
+    def __init__(self, username, min_rating, max_rating, contest_limit):
+        super().__init__()
+        self.username = username
+        self.min_rating = min_rating
+        self.max_rating = max_rating
+        self.contest_limit = contest_limit
+        self.cache_file = 'problems_cache.json'
+        self.cache_expiry = 24  # hours
 
-        # Header
-        header = ttk.Label(
-            root, 
-            text="Codeforces Problem Finder", 
-            style='Header.TLabel'
-        )
-        header.pack(pady=10)
+    def run(self):
+        try:
+            problems = self.get_problems()
+            if problems:
+                self.finished.emit(problems)
+            else:
+                self.error.emit("No problems found matching the criteria")
+        except Exception as e:
+            self.error.emit(str(e))
 
+    def get_problems(self):
+        # Check cache first
+        cached_data = self.load_cache()
+        if cached_data:
+            return cached_data
 
-        # Settings frame
-        self.settings_frame = ttk.Frame(root)
-        self.settings_frame.pack(fill='x', pady=10)
+        # Fetch user's solved problems
+        user_url = f"https://codeforces.com/api/user.status?handle={self.username}"
+        user_response = requests.get(user_url)
+        if user_response.status_code != 200:
+            raise Exception("Failed to fetch user data")
+        
+        solved_problems = set()
+        for submission in user_response.json()['result']:
+            if submission['verdict'] == 'OK':
+                problem = submission['problem']
+                solved_problems.add(f"{problem.get('contestId')}_{problem.get('index')}")
 
-        # Rating range frame
-        rating_frame = ttk.LabelFrame(self.settings_frame, text="Rating Range")
-        rating_frame.pack(side='left', padx=10, fill='x', expand=True)
+        # Fetch all problems
+        problems_url = "https://codeforces.com/api/problemset.problems"
+        problems_response = requests.get(problems_url)
+        if problems_response.status_code != 200:
+            raise Exception("Failed to fetch problems")
+
+        problems_data = problems_response.json()['result']['problems']
+        
+        # Filter problems
+        filtered_problems = []
+        seen_contest_ids = set()
+        
+        for problem in problems_data:
+            if len(seen_contest_ids) >= self.contest_limit:
+                break
+                
+            contest_id = problem.get('contestId')
+            if contest_id not in seen_contest_ids:
+                seen_contest_ids.add(contest_id)
+            
+            if (problem.get('rating', 0) >= self.min_rating and 
+                problem.get('rating', 0) <= self.max_rating and
+                f"{problem.get('contestId')}_{problem.get('index')}" not in solved_problems):
+                
+                problem_info = {
+                    'name': problem.get('name'),
+                    'rating': problem.get('rating', 0),
+                    'contestId': problem.get('contestId'),
+                    'index': problem.get('index'),
+                    'tags': problem.get('tags', []),
+                    'url': f"https://codeforces.com/problemset/problem/{problem.get('contestId')}/{problem.get('index')}"
+                }
+                filtered_problems.append(problem_info)
+
+        # Save to cache
+        self.save_cache(filtered_problems)
+        return filtered_problems
+
+    def load_cache(self):
+        if not os.path.exists(self.cache_file):
+            return None
+            
+        try:
+            with open(self.cache_file, 'r') as f:
+                cache = json.load(f)
+                
+            # Get timestamp from cache
+            cache_time = datetime.fromtimestamp(cache.get('timestamp', 0))
+            
+            # Check if cache is expired
+            if datetime.now() - cache_time > timedelta(hours=self.cache_expiry):
+                return None
+                
+            return cache.get('problems', None)
+        except (json.JSONDecodeError, KeyError, ValueError, OSError):
+            return None
+
+    def save_cache(self, problems):
+        cache_data = {
+            'timestamp': datetime.now().timestamp(),  # Store as Unix timestamp
+            'problems': problems
+        }
+        try:
+            with open(self.cache_file, 'w') as f:
+                json.dump(cache_data, f)
+        except OSError:
+            pass
+
+class CodeforcesApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.problems = []
+        self.dark_mode = False
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle('Codeforces Problem Finder')
+        self.setMinimumSize(800, 600)
+
+        # Main widget and layout
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        layout = QVBoxLayout(main_widget)
+
+        # Input controls
+        input_widget = QWidget()
+        input_layout = QHBoxLayout(input_widget)
+
+        # Username input
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Codeforces Username")
+        input_layout.addWidget(self.username_input)
 
         # Rating range inputs
-        self.ratings = [800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 
-                       1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 
-                       2400, 2500, 2600, 2700, 2800, 2900, 3000, 3100, 
-                       3200, 3300, 3400, 3500]
-
-        ttk.Label(rating_frame, text="From:").pack(side='left', padx=5)
-        self.rating_from = ttk.Combobox(
-            rating_frame,
-            values=self.ratings,
-            width=8
-        )
-        self.rating_from.set("800")
-        self.rating_from.pack(side='left', padx=5)
-
-        ttk.Label(rating_frame, text="To:").pack(side='left', padx=5)
-        self.rating_to = ttk.Combobox(
-            rating_frame,
-            values=self.ratings,
-            width=8
-        )
-        self.rating_to.set("3500")
-        self.rating_to.pack(side='left', padx=5)
-
-        # Sort options frame
-        sort_frame = ttk.LabelFrame(self.settings_frame, text="Sort By")
-        sort_frame.pack(side='left', padx=10, fill='x', expand=True)
-
-        self.sort_var = tk.StringVar(value="rating")
-        sort_options = [
-            ("Rating", "rating"),
-            ("Contest ID", "contestId"),
-            ("Solved Count", "solvedCount"),
-            ("Difficulty", "rating")
-        ]
-
-        for text, value in sort_options:
-            ttk.Radiobutton(
-                sort_frame,
-                text=text,
-                value=value,
-                variable=self.sort_var
-            ).pack(side='left', padx=5)
-
-        # Order direction
-        self.order_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            sort_frame,
-            text="Ascending",
-            variable=self.order_var
-        ).pack(side='left', padx=5)
-
-        # Show tags checkbox
-        self.show_tags_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            self.settings_frame,
-            text="Show Tags",
-            variable=self.show_tags_var,
-            command=self.update_problems_display
-        ).pack(side='left', padx=10)
-
-        # Find button
-        self.find_button = ttk.Button(
-            root,
-            text="Find Problems",
-            command=self.find_problems_thread
-        )
-        self.find_button.pack(pady=10)
-
-        # Progress bar
-        self.progress = ttk.Progressbar(
-            root,
-            mode='indeterminate',
-            length=400
-        )
-        self.progress.pack(pady=10)
-
-        # Create Treeview for problems
-        self.create_problem_tree()
-
-        # Store problems data
-        self.problems_data = []
-        self.solved_problems = set()
-
-        # Random button (moved to bottom)
-        self.random_button = ttk.Button(
-            root,
-            text="Pick Random Problem",
-            command=self.pick_random_problem
-        )
-        self.random_button.pack(pady=10)
-        from codeforces_enhancements import CodeforcesEnhancements
-        self.enhancements = CodeforcesEnhancements(self)
+        self.min_rating = QSpinBox()
+        self.min_rating.setRange(800, 3500)
+        self.min_rating.setValue(800)
+        self.max_rating = QSpinBox()
+        self.max_rating.setRange(800, 3500)
+        self.max_rating.setValue(3500)
         
-    def pick_random_problem(self):
-        """Pick a random problem from the displayed list and open it."""
-        if self.problems_data:
-            random_problem = random.choice(self.problems_data)
-            contest_id = random_problem['contestId']
-            index = random_problem['index']
-            url = f"https://codeforces.com/problemset/problem/{contest_id}/{index}"
-            webbrowser.open(url)
-        else:
-            self.show_error("No problems found. Please perform a search first.")
-    def create_problem_tree(self):
-        """Create and configure the Treeview for displaying problems."""
-        columns = ('name', 'rating', 'solved_count', 'tags')
-        self.tree = ttk.Treeview(self.root, columns=columns, show='headings')
+        input_layout.addWidget(QLabel("Rating Range:"))
+        input_layout.addWidget(self.min_rating)
+        input_layout.addWidget(QLabel("to"))
+        input_layout.addWidget(self.max_rating)
+
+        # Contest limit input
+        self.contest_limit = QSpinBox()
+        self.contest_limit.setRange(1, 1000)
+        self.contest_limit.setValue(100)
+        input_layout.addWidget(QLabel("Contest Limit:"))
+        input_layout.addWidget(self.contest_limit)
+
+        # Fetch button
+        self.fetch_button = QPushButton("Fetch Problems")
+        self.fetch_button.clicked.connect(self.fetch_problems)
+        input_layout.addWidget(self.fetch_button)
+
+        # Dark mode toggle
+        self.dark_mode_toggle = QCheckBox("Dark Mode")
+        self.dark_mode_toggle.stateChanged.connect(self.toggle_dark_mode)
+        input_layout.addWidget(self.dark_mode_toggle)
+
+        layout.addWidget(input_widget)
+
+        # Sorting controls
+        sort_widget = QWidget()
+        sort_layout = QHBoxLayout(sort_widget)
         
-        # Configure columns
-        self.tree.heading('name', text='Problem Name', command=lambda: self.sort_problems('name'))
-        self.tree.heading('rating', text='Rating', command=lambda: self.sort_problems('rating'))
-        self.tree.heading('solved_count', text='Solved Count', command=lambda: self.sort_problems('solvedCount'))
-        self.tree.heading('tags', text='Tags', command=lambda: self.sort_problems('tags'))
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems(["Rating ↑", "Rating ↓", "Name A-Z", "Name Z-A", "Contest ID ↑", "Contest ID ↓"])
+        self.sort_combo.currentIndexChanged.connect(self.sort_problems)
+        sort_layout.addWidget(QLabel("Sort by:"))
+        sort_layout.addWidget(self.sort_combo)
 
-        # Set column widths
-        self.tree.column('name', width=300)
-        self.tree.column('rating', width=100)
-        self.tree.column('solved_count', width=100)
-        self.tree.column('tags', width=400)
+        # Random problem button
+        self.random_button = QPushButton("Open Random Problem")
+        self.random_button.clicked.connect(self.open_random_problem)
+        sort_layout.addWidget(self.random_button)
 
-        # Add scrollbars
-        scrollbar_y = ttk.Scrollbar(self.root, orient='vertical', command=self.tree.yview)
-        scrollbar_x = ttk.Scrollbar(self.root, orient='horizontal', command=self.tree.xview)
-        self.tree.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+        layout.addWidget(sort_widget)
 
-        # Create a frame for browser buttons
-        browser_frame = ttk.Frame(self.root)
+        # Problems table
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["Name", "Rating", "Contest ID", "Index", "Tags"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.doubleClicked.connect(self.open_problem)
+        layout.addWidget(self.table)
+
+        self.statusBar().showMessage('Ready')
+
+    def fetch_problems(self):
+        self.statusBar().showMessage('Fetching problems...')
+        self.fetch_button.setEnabled(False)
+        self.table.setRowCount(0)
         
-        # Create browser-specific buttons
-        firefox_button = ttk.Button(
-            browser_frame,
-            text="Open in Firefox",
-            command=lambda: self.open_problem_in_browser('firefox')
+        self.fetcher = DataFetcher(
+            self.username_input.text(),
+            self.min_rating.value(),
+            self.max_rating.value(),
+            self.contest_limit.value()
         )
-        chrome_button = ttk.Button(
-            browser_frame,
-            text="Open in Chrome",
-            command=lambda: self.open_problem_in_browser('chrome')
-        )
+        self.fetcher.finished.connect(self.update_problems)
+        self.fetcher.error.connect(self.show_error)
+        self.fetcher.start()
 
-        # Pack browser buttons
-        firefox_button.pack(side='left', padx=5)
-        chrome_button.pack(side='left', padx=5)
+    def update_problems(self, problems):
+        self.problems = problems
+        self.display_problems()
+        self.fetch_button.setEnabled(True)
+        self.statusBar().showMessage(f'Found {len(problems)} problems')
 
-        # Pack everything
-        scrollbar_y.pack(side='right', fill='y')
-        scrollbar_x.pack(side='bottom', fill='x')
-        self.tree.pack(fill='both', expand=True)
-        browser_frame.pack(pady=10)
-    def get_browser_path(self, browser):
-        """Get the path to the browser executable based on the operating system."""
-        if sys.platform.startswith('win'):  # Windows
-            if browser == 'chrome':
-                paths = [
-                    os.path.join(os.environ.get('PROGRAMFILES', ''), 'Google/Chrome/Application/chrome.exe'),
-                    os.path.join(os.environ.get('PROGRAMFILES(X86)', ''), 'Google/Chrome/Application/chrome.exe')
-                ]
-            else:  # firefox
-                paths = [
-                    os.path.join(os.environ.get('PROGRAMFILES', ''), 'Mozilla Firefox/firefox.exe'),
-                    os.path.join(os.environ.get('PROGRAMFILES(X86)', ''), 'Mozilla Firefox/firefox.exe')
-                ]
-        elif sys.platform.startswith('darwin'):  # macOS
-            if browser == 'chrome':
-                paths = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
-            else:  # firefox
-                paths = ['/Applications/Firefox.app/Contents/MacOS/firefox']
-        else:  # Linux
-            if browser == 'chrome':
-                paths = ['google-chrome', 'google-chrome-stable']
-            else:  # firefox
-                paths = ['firefox']
+    def show_error(self, error_message):
+        self.statusBar().showMessage(f'Error: {error_message}')
+        self.fetch_button.setEnabled(True)
 
-        # For Linux, try to find the browser in PATH
-        if not sys.platform.startswith('win') and not sys.platform.startswith('darwin'):
-            for path in paths:
-                try:
-                    return subprocess.check_output(['which', path]).decode().strip()
-                except subprocess.CalledProcessError:
-                    continue
+    def display_problems(self):
+        self.table.setRowCount(len(self.problems))
+        for i, problem in enumerate(self.problems):
+            self.table.setItem(i, 0, QTableWidgetItem(problem['name']))
+            self.table.setItem(i, 1, QTableWidgetItem(str(problem['rating'])))
+            self.table.setItem(i, 2, QTableWidgetItem(str(problem['contestId'])))
+            self.table.setItem(i, 3, QTableWidgetItem(problem['index']))
+            self.table.setItem(i, 4, QTableWidgetItem(', '.join(problem['tags'])))
 
-        # For Windows and macOS, check if the paths exist
-        else:
-            for path in paths:
-                if os.path.exists(path):
-                    return path
-
-        return None
-    
-    def open_problem_in_browser(self, browser):
-        """Open the selected problem in the specified browser."""
-        selected_items = self.tree.selection()
-        if not selected_items:
-            self.show_error("Please select a problem first")
-            return
-
-        selected_item = selected_items[0]
-        contest_id, index = self.tree.item(selected_item)['tags']
-        url = f"https://codeforces.com/problemset/problem/{contest_id}/{index}"
-
-        browser_path = self.get_browser_path(browser)
-        if browser_path:
-            try:
-                if sys.platform.startswith('win'):
-                    subprocess.Popen([browser_path, url])
-                else:
-                    subprocess.Popen([browser_path, '-new-tab', url])
-            except subprocess.SubprocessError:
-                self.show_error(f"Failed to open {browser}. Using default browser instead.")
-                webbrowser.open(url)
-        else:
-            self.show_error(f"{browser.title()} not found. Using default browser instead.")
-            webbrowser.open(url)
-
-    def pick_random_problem(self):
-        """Pick a random problem from the displayed list and open it."""
-        if self.problems_data:
-            random_problem = random.choice(self.problems_data)
-            contest_id = random_problem['contestId']
-            index = random_problem['index']
-            url = f"https://codeforces.com/problemset/problem/{contest_id}/{index}"
-            
-            # Show a dialog to choose the browser
-            dialog = tk.Toplevel(self.root)
-            dialog.title("Choose Browser")
-            dialog.geometry("200x100")
-            dialog.transient(self.root)
-            
-            ttk.Button(
-                dialog,
-                text="Open in Firefox",
-                command=lambda: self.open_random_problem(url, 'firefox', dialog)
-            ).pack(pady=5)
-            
-            ttk.Button(
-                dialog,
-                text="Open in Chrome",
-                command=lambda: self.open_random_problem(url, 'chrome', dialog)
-            ).pack(pady=5)
-        else:
-            self.show_error("No problems found. Please perform a search first.")
-
-    def open_random_problem(self, url, browser, dialog):
-        """Open the random problem in the specified browser and close the dialog."""
-        browser_path = self.get_browser_path(browser)
-        if browser_path:
-            try:
-                if sys.platform.startswith('win'):
-                    subprocess.Popen([browser_path, url])
-                else:
-                    subprocess.Popen([browser_path, '-new-tab', url])
-            except subprocess.SubprocessError:
-                self.show_error(f"Failed to open {browser}. Using default browser instead.")
-                webbrowser.open(url)
-        else:
-            self.show_error(f"{browser.title()} not found. Using default browser instead.")
-            webbrowser.open(url)
-        dialog.destroy()
-
-    def get_user_solved_problems(self, username):
-        """Fetch solved problems for a given username."""
-        try:
-            response = requests.get(f"https://codeforces.com/api/user.status?handle={username}")
-            if response.status_code != 200:
-                return "Error: Unable to fetch user data from Codeforces API"
-            
-            data = response.json()
-            if data["status"] != "OK":
-                return "Error: Invalid username or API request failed"
-            
-            # Get unique problems that were solved (verdict="OK")
-            solved = {
-                f"{submission['problem']['contestId']},{submission['problem']['index']}"
-                for submission in data["result"]
-                if submission["verdict"] == "OK"
-            }
-            
-            return solved
-            
-        except requests.exceptions.RequestException:
-            return "Error: Network error occurred"
-        except (KeyError, ValueError):
-            return "Error: Invalid response format from API"
-
-    def get_problems(self, rating_from, rating_to):
-        """Fetch problems from Codeforces API within rating range."""
-        try:
-            response = requests.get("https://codeforces.com/api/problemset.problems")
-            if response.status_code != 200:
-                return "Error: Unable to fetch problems from Codeforces API"
-            
-            data = response.json()
-            if data["status"] != "OK":
-                return "Error: API request failed"
-            
-            problems = data["result"]["problems"]
-            statistics = data["result"]["problemStatistics"]
-
-            # Create solved count dictionary
-            solved_counts = {
-                f"{stat['contestId']},{stat['index']}": stat.get('solvedCount', 0)
-                for stat in statistics
-            }
-
-            # Filter problems by rating range and unsolved status
-            matching_problems = [
-                {**p, 'solvedCount': solved_counts.get(f"{p['contestId']},{p['index']}", 0)}
-                for p in problems
-                if p.get('rating') is not None 
-                and rating_from <= p['rating'] <= rating_to
-                and f"{p['contestId']},{p['index']}" not in self.solved_problems
-            ]
-            
-            return matching_problems
-            
-        except requests.exceptions.RequestException:
-            return "Error: Network error occurred"
-        except (KeyError, ValueError):
-            return "Error: Invalid response format from API"
-
-    def find_problems_thread(self):
-        """Start a new thread to fetch problems."""
-        self.find_button.config(state='disabled')
-        self.progress.start()
-        Thread(target=self.find_problems).start()
-
-    def find_problems(self):
-        """Fetch and display problems."""
-        try:
-            username = self.username_var.get().strip()
-            if username:
-                solved_result = self.get_user_solved_problems(username)
-                if isinstance(solved_result, str):
-                    self.show_error(solved_result)
-                    return
-                self.solved_problems = solved_result
-                if hasattr(self, 'enhancements'):
-                    self.enhancements.update_user_profile()
-            else:
-                self.solved_problems = set()
-
-            rating_from = int(self.rating_from.get())
-            rating_to = int(self.rating_to.get())
-            
-            if rating_from > rating_to:
-                self.show_error("'From' rating must be less than or equal to 'To' rating")
-                return
-                
-            result = self.get_problems(rating_from, rating_to)
-            
-            if isinstance(result, str):
-                self.show_error(result)
-            else:
-                self.problems_data = result
-                self.update_problems_display()
-                
-                if hasattr(self, 'enhancements'):
-                    self.enhancements.update_difficulty_histogram()
-                
-        except ValueError:
-            self.show_error("Please enter valid ratings")
-        finally:
-            self.root.after(0, self.cleanup_after_search)
-            
-    def show_info(self, message):
-        """Display info message."""
-        messagebox.showinfo("Information", message)
+    def sort_problems(self):
+        sort_type = self.sort_combo.currentText()
+        if sort_type == "Rating ↑":
+            self.problems.sort(key=lambda x: x['rating'])
+        elif sort_type == "Rating ↓":
+            self.problems.sort(key=lambda x: x['rating'], reverse=True)
+        elif sort_type == "Name A-Z":
+            self.problems.sort(key=lambda x: x['name'])
+        elif sort_type == "Name Z-A":
+            self.problems.sort(key=lambda x: x['name'], reverse=True)
+        elif sort_type == "Contest ID ↑":
+            self.problems.sort(key=lambda x: x['contestId'])
+        elif sort_type == "Contest ID ↓":
+            self.problems.sort(key=lambda x: x['contestId'], reverse=True)
         
-    def update_problems_display(self):
-        """Update the problems displayed in the Treeview."""
-        # Clear existing items
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        self.display_problems()
 
-        # Sort problems
-        sort_key = self.sort_var.get()
-        reverse = not self.order_var.get()
-        
-        sorted_problems = sorted(
-            self.problems_data,
-            key=lambda x: (x.get(sort_key, 0) if sort_key != 'name' else x['name']),
-            reverse=reverse
-        )
+    def open_problem(self, index):
+        row = index.row()
+        problem = self.problems[row]
+        webbrowser.open(problem['url'])
 
-        # Add problems to treeview
-        for problem in sorted_problems:
-            tags = ', '.join(problem['tags']) if self.show_tags_var.get() else ''
-            self.tree.insert('', 'end', values=(
-                problem['name'],
-                problem['rating'],
-                problem.get('solvedCount', 'N/A'),
-                tags
-            ), tags=(str(problem['contestId']), problem['index']))
+    def open_random_problem(self):
+        if self.problems:
+            problem = random.choice(self.problems)
+            webbrowser.open(problem['url'])
 
-    def open_problem(self, event):
-        """Open the selected problem in web browser."""
-        selected_item = self.tree.selection()[0]
-        contest_id, index = self.tree.item(selected_item)['tags']
-        url = f"https://codeforces.com/problemset/problem/{contest_id}/{index}"
-        webbrowser.open(url)
-
-    def cleanup_after_search(self):
-        """Reset UI elements after search completes."""
-        self.find_button.config(state='normal')
-        self.progress.stop()
-
-    def show_info(self, message):
-        """Display info message."""
-        messagebox.showinfo("Information", message)
-
-    def show_error(self, message):
-        """Display error message."""
-        messagebox.showerror("Error", message)
+    def toggle_dark_mode(self, state):
+        app = QApplication.instance()
+        if state:
+            app.setStyle(QStyleFactory.create("Fusion"))
+            palette = QPalette()
+            palette.setColor(QPalette.Window, QColor(53, 53, 53))
+            palette.setColor(QPalette.WindowText, Qt.white)
+            palette.setColor(QPalette.Base, QColor(25, 25, 25))
+            palette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
+            palette.setColor(QPalette.ToolTipBase, Qt.white)
+            palette.setColor(QPalette.ToolTipText, Qt.white)
+            palette.setColor(QPalette.Text, Qt.white)
+            palette.setColor(QPalette.Button, QColor(53, 53, 53))
+            palette.setColor(QPalette.ButtonText, Qt.white)
+            palette.setColor(QPalette.BrightText, Qt.red)
+            palette.setColor(QPalette.Link, QColor(42, 130, 218))
+            palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+            palette.setColor(QPalette.HighlightedText, Qt.black)
+            app.setPalette(palette)
+        else:
+            app.setStyle(QStyleFactory.create("Fusion"))
+            app.setPalette(app.style().standardPalette())
 
 def main():
-    root = tk.Tk()
-    app = CodeforcesGUI(root)
-    root.mainloop()
+    app = QApplication(sys.argv)
+    ex = CodeforcesApp()
+    ex.show()
+    sys.exit(app.exec_())
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

@@ -1,10 +1,8 @@
 import sys
-import os
-import json
 import random
 import requests
 import webbrowser
-from datetime import datetime, timedelta
+from datetime import datetime
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                            QHBoxLayout, QLabel, QLineEdit, QPushButton, 
                            QSpinBox, QTableWidget, QTableWidgetItem, QComboBox,
@@ -22,8 +20,6 @@ class DataFetcher(QThread):
         self.min_rating = min_rating
         self.max_rating = max_rating
         self.contest_limit = contest_limit
-        self.cache_file = 'problems_cache.json'
-        self.cache_expiry = 24  # hours
 
     def run(self):
         try:
@@ -36,12 +32,16 @@ class DataFetcher(QThread):
             self.error.emit(str(e))
 
     def get_problems(self):
-        # Check cache first
-        cached_data = self.load_cache()
-        if cached_data:
-            return cached_data
+        # Get solved problems for the user
+        solved_problems = self.get_solved_problems()
+        
+        # Fetch all problems
+        all_problems = self.fetch_all_problems()
+        
+        # Filter problems based on criteria
+        return self.filter_problems(all_problems, solved_problems)
 
-        # Fetch user's solved problems
+    def get_solved_problems(self):
         user_url = f"https://codeforces.com/api/user.status?handle={self.username}"
         user_response = requests.get(user_url)
         if user_response.status_code != 200:
@@ -52,85 +52,60 @@ class DataFetcher(QThread):
             if submission['verdict'] == 'OK':
                 problem = submission['problem']
                 solved_problems.add(f"{problem.get('contestId')}_{problem.get('index')}")
+        
+        return solved_problems
 
-        # Fetch all problems
+    def fetch_all_problems(self):
         problems_url = "https://codeforces.com/api/problemset.problems"
         problems_response = requests.get(problems_url)
         if problems_response.status_code != 200:
             raise Exception("Failed to fetch problems")
-
-        problems_data = problems_response.json()['result']['problems']
         
-        # Filter problems
+        problems_data = problems_response.json()['result']['problems']
+        return [{
+            'name': problem.get('name'),
+            'rating': problem.get('rating', 0),
+            'contestId': problem.get('contestId'),
+            'index': problem.get('index'),
+            'tags': problem.get('tags', []),
+            'url': f"https://codeforces.com/problemset/problem/{problem.get('contestId')}/{problem.get('index')}"
+        } for problem in problems_data]
+
+    def filter_problems(self, all_problems, solved_problems):
         filtered_problems = []
         seen_contest_ids = set()
         
-        for problem in problems_data:
+        for problem in all_problems:
             if len(seen_contest_ids) >= self.contest_limit:
                 break
-                
+            
             contest_id = problem.get('contestId')
-            if contest_id not in seen_contest_ids:
-                seen_contest_ids.add(contest_id)
+            problem_id = f"{contest_id}_{problem.get('index')}"
             
             if (problem.get('rating', 0) >= self.min_rating and 
                 problem.get('rating', 0) <= self.max_rating and
-                f"{problem.get('contestId')}_{problem.get('index')}" not in solved_problems):
+                problem_id not in solved_problems):
                 
-                problem_info = {
-                    'name': problem.get('name'),
-                    'rating': problem.get('rating', 0),
-                    'contestId': problem.get('contestId'),
-                    'index': problem.get('index'),
-                    'tags': problem.get('tags', []),
-                    'url': f"https://codeforces.com/problemset/problem/{problem.get('contestId')}/{problem.get('index')}"
-                }
-                filtered_problems.append(problem_info)
-
-        # Save to cache
-        self.save_cache(filtered_problems)
+                if contest_id not in seen_contest_ids:
+                    seen_contest_ids.add(contest_id)
+                
+                filtered_problems.append(problem)
+        
         return filtered_problems
-
-    def load_cache(self):
-        if not os.path.exists(self.cache_file):
-            return None
-            
-        try:
-            with open(self.cache_file, 'r') as f:
-                cache = json.load(f)
-                
-            # Get timestamp from cache
-            cache_time = datetime.fromtimestamp(cache.get('timestamp', 0))
-            
-            # Check if cache is expired
-            if datetime.now() - cache_time > timedelta(hours=self.cache_expiry):
-                return None
-                
-            return cache.get('problems', None)
-        except (json.JSONDecodeError, KeyError, ValueError, OSError):
-            return None
-
-    def save_cache(self, problems):
-        cache_data = {
-            'timestamp': datetime.now().timestamp(),  # Store as Unix timestamp
-            'problems': problems
-        }
-        try:
-            with open(self.cache_file, 'w') as f:
-                json.dump(cache_data, f)
-        except OSError:
-            pass
 
 class CodeforcesApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.problems = []
-        self.dark_mode = False
+        self.dark_mode = True  # Changed to True for default dark mode
         self.initUI()
-
+        
     def initUI(self):
         self.setWindowTitle('Codeforces Problem Finder')
         self.setMinimumSize(800, 600)
+
+        # Set dark mode by default
+        self.apply_dark_mode()
 
         # Main widget and layout
         main_widget = QWidget()
@@ -171,8 +146,9 @@ class CodeforcesApp(QMainWindow):
         self.fetch_button.clicked.connect(self.fetch_problems)
         input_layout.addWidget(self.fetch_button)
 
-        # Dark mode toggle
+        # Dark mode toggle - set checked by default
         self.dark_mode_toggle = QCheckBox("Dark Mode")
+        self.dark_mode_toggle.setChecked(True)  # Set checked by default
         self.dark_mode_toggle.stateChanged.connect(self.toggle_dark_mode)
         input_layout.addWidget(self.dark_mode_toggle)
 
@@ -206,6 +182,34 @@ class CodeforcesApp(QMainWindow):
         layout.addWidget(self.table)
 
         self.statusBar().showMessage('Ready')
+
+    def apply_dark_mode(self):
+        """Apply dark mode styling"""
+        app = QApplication.instance()
+        app.setStyle(QStyleFactory.create("Fusion"))
+        palette = QPalette()
+        palette.setColor(QPalette.Window, QColor(53, 53, 53))
+        palette.setColor(QPalette.WindowText, Qt.white)
+        palette.setColor(QPalette.Base, QColor(25, 25, 25))
+        palette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
+        palette.setColor(QPalette.ToolTipBase, Qt.white)
+        palette.setColor(QPalette.ToolTipText, Qt.white)
+        palette.setColor(QPalette.Text, Qt.white)
+        palette.setColor(QPalette.Button, QColor(53, 53, 53))
+        palette.setColor(QPalette.ButtonText, Qt.white)
+        palette.setColor(QPalette.BrightText, Qt.red)
+        palette.setColor(QPalette.Link, QColor(42, 130, 218))
+        palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+        palette.setColor(QPalette.HighlightedText, Qt.black)
+        app.setPalette(palette)
+
+    def toggle_dark_mode(self, state):
+        app = QApplication.instance()
+        if state:
+            self.apply_dark_mode()
+        else:
+            app.setStyle(QStyleFactory.create("Fusion"))
+            app.setPalette(app.style().standardPalette())
 
     def fetch_problems(self):
         self.statusBar().showMessage('Fetching problems...')
@@ -267,29 +271,6 @@ class CodeforcesApp(QMainWindow):
         if self.problems:
             problem = random.choice(self.problems)
             webbrowser.open(problem['url'])
-
-    def toggle_dark_mode(self, state):
-        app = QApplication.instance()
-        if state:
-            app.setStyle(QStyleFactory.create("Fusion"))
-            palette = QPalette()
-            palette.setColor(QPalette.Window, QColor(53, 53, 53))
-            palette.setColor(QPalette.WindowText, Qt.white)
-            palette.setColor(QPalette.Base, QColor(25, 25, 25))
-            palette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
-            palette.setColor(QPalette.ToolTipBase, Qt.white)
-            palette.setColor(QPalette.ToolTipText, Qt.white)
-            palette.setColor(QPalette.Text, Qt.white)
-            palette.setColor(QPalette.Button, QColor(53, 53, 53))
-            palette.setColor(QPalette.ButtonText, Qt.white)
-            palette.setColor(QPalette.BrightText, Qt.red)
-            palette.setColor(QPalette.Link, QColor(42, 130, 218))
-            palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
-            palette.setColor(QPalette.HighlightedText, Qt.black)
-            app.setPalette(palette)
-        else:
-            app.setStyle(QStyleFactory.create("Fusion"))
-            app.setPalette(app.style().standardPalette())
 
 def main():
     app = QApplication(sys.argv)

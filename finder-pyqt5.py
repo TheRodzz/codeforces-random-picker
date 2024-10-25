@@ -15,53 +15,132 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont, QPalette, QColor
 
 class StyledWidget(QWidget):
-    def __init__(self):
+    def __init__(self, dark_mode=False):
         super().__init__()
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #f5f5f5;
-            }
-            QLabel {
-                color: #2c3e50;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QLineEdit, QSpinBox, QComboBox {
-                padding: 6px;
-                border: 1px solid #bdc3c7;
-                border-radius: 4px;
-                background-color: white;
-                min-height: 25px;
-            }
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                padding: 8px 15px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-            QTableWidget {
-                border: 1px solid #bdc3c7;
-                border-radius: 4px;
-                background-color: white;
-            }
-            QTableWidget::item {
-                padding: 5px;
-            }
-            QHeaderView::section {
-                background-color: #34495e;
-                color: white;
-                padding: 8px;
-                border: none;
-            }
-        """)
+        self.update_theme(dark_mode)
+
+    def update_theme(self, dark_mode):
+        if dark_mode:
+            self.setStyleSheet("""
+                QWidget {
+                    background-color: #1e1e1e;
+                    color: #ffffff;
+                }
+                QLabel {
+                    color: #ffffff;
+                    font-weight: bold;
+                    font-size: 12px;
+                }
+                QLineEdit, QSpinBox, QComboBox {
+                    padding: 6px;
+                    border: 1px solid #404040;
+                    border-radius: 4px;
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    min-height: 25px;
+                }
+                QPushButton {
+                    background-color: #0078d4;
+                    color: white;
+                    padding: 8px 15px;
+                    border: none;
+                    border-radius: 4px;
+                    font-weight: bold;
+                    min-width: 100px;
+                }
+                QPushButton:hover {
+                    background-color: #1084d8;
+                }
+                QPushButton:disabled {
+                    background-color: #404040;
+                    color: #808080;
+                }
+                QTableWidget {
+                    border: 1px solid #404040;
+                    border-radius: 4px;
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    gridline-color: #404040;
+                }
+                QTableWidget::item {
+                    padding: 5px;
+                }
+                QHeaderView::section {
+                    background-color: #333333;
+                    color: white;
+                    padding: 8px;
+                    border: none;
+                }
+                QFrame {
+                    background-color: #2d2d2d;
+                    border: 1px solid #404040;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                }
+                QComboBox::down-arrow {
+                    image: none;
+                    border-left: 5px solid transparent;
+                    border-right: 5px solid transparent;
+                    border-top: 5px solid #ffffff;
+                    width: 0;
+                    height: 0;
+                    margin-right: 5px;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QWidget {
+                    background-color: #f5f5f5;
+                }
+                QLabel {
+                    color: #2c3e50;
+                    font-weight: bold;
+                    font-size: 12px;
+                }
+                QLineEdit, QSpinBox, QComboBox {
+                    padding: 6px;
+                    border: 1px solid #bdc3c7;
+                    border-radius: 4px;
+                    background-color: white;
+                    min-height: 25px;
+                }
+                QPushButton {
+                    background-color: #0078d4;
+                    color: white;
+                    padding: 8px 15px;
+                    border: none;
+                    border-radius: 4px;
+                    font-weight: bold;
+                    min-width: 100px;
+                }
+                QPushButton:hover {
+                    background-color: #1084d8;
+                }
+                QPushButton:disabled {
+                    background-color: #bdc3c7;
+                    color: #ffffff;
+                }
+                QTableWidget {
+                    border: 1px solid #bdc3c7;
+                    border-radius: 4px;
+                    background-color: white;
+                    gridline-color: #dcdcdc;
+                }
+                QTableWidget::item {
+                    padding: 5px;
+                }
+                QHeaderView::section {
+                    background-color: #34495e;
+                    color: white;
+                    padding: 8px;
+                    border: none;
+                }
+                QFrame {
+                    background-color: white;
+                    border: 1px solid #bdc3c7;
+                }
+            """)
 
 class ProblemFinder(QMainWindow):
     def __init__(self):
@@ -71,28 +150,35 @@ class ProblemFinder(QMainWindow):
         self.problems_data = []
         self.filtered_problems = []
         self.selected_browser = "default"
+        self.dark_mode = False
         self.initUI()
 
     def initUI(self):
         self.setWindowTitle('Codeforces Problem Finder')
         self.setGeometry(100, 100, 1200, 800)
-        self.setStyleSheet("background-color: #f5f5f5;")
 
         # Create main widget and layout
-        main_widget = StyledWidget()
-        self.setCentralWidget(main_widget)
+        self.main_widget = StyledWidget(self.dark_mode)
+        self.setCentralWidget(self.main_widget)
         layout = QVBoxLayout()
         layout.setSpacing(20)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        # Header
+        # Add theme toggle button in header
+        header_layout = QHBoxLayout()
         header_label = QLabel('Codeforces Problem Finder')
         header_label.setStyleSheet("""
             font-size: 24px;
-            color: #2c3e50;
             font-weight: bold;
             padding: 10px;
         """)
+        self.theme_toggle = QPushButton('🌙 Dark Mode' if not self.dark_mode else '☀️ Light Mode')
+        self.theme_toggle.clicked.connect(self.toggle_theme)
+        self.theme_toggle.setFixedWidth(120)
+        
+        header_layout.addWidget(header_label, alignment=Qt.AlignCenter)
+        header_layout.addWidget(self.theme_toggle, alignment=Qt.AlignRight)
+        layout.addLayout(header_layout)
         layout.addWidget(header_label, alignment=Qt.AlignCenter)
 
         # Create a frame for input controls
@@ -221,8 +307,21 @@ class ProblemFinder(QMainWindow):
             }
         """)
 
-        main_widget.setLayout(layout)
+        self.main_widget.setLayout(layout)
 
+    def toggle_theme(self):
+        self.dark_mode = not self.dark_mode
+        self.theme_toggle.setText('☀️ Light Mode' if self.dark_mode else '🌙 Dark Mode')
+        self.main_widget.update_theme(self.dark_mode)
+        
+        # Update status bar theme
+        self.statusBar.setStyleSheet(f"""
+            QStatusBar {{
+                background-color: {'#1e1e1e' if self.dark_mode else '#34495e'};
+                color: white;
+                padding: 5px;
+            }}
+        """)
     def open_random_problem(self):
         if not self.filtered_problems:
             QMessageBox.warning(self, 'Error', 'No problems available to choose from')

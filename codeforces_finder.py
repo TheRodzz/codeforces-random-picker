@@ -1,15 +1,15 @@
 import sys
 import random
 import json
-import requests
+import shutil
+import os
 import webbrowser
-from datetime import datetime
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                            QHBoxLayout, QLabel, QLineEdit, QPushButton, 
                            QSpinBox, QTableWidget, QTableWidgetItem, QComboBox,
-                           QHeaderView, QStyle, QStyleFactory, QCheckBox, 
-                           QFileDialog, QInputDialog, QMessageBox,QTabWidget)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+                           QHeaderView, QStyleFactory, QCheckBox, 
+                           QMessageBox,QTabWidget)
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPalette, QColor
 
 from DataFetcher import DataFetcher
@@ -21,14 +21,141 @@ class CodeforcesApp(QMainWindow):
         self.problems = []
         self.dark_mode = True  
         self.user_preferences = self.load_preferences()
+        self.available_browsers = self.get_available_browsers()
+        self.current_browser = self.user_preferences.get('browser', 'System Default')
         self.initUI()
         self.setup_tabs()
+
+    def get_default_browser_name(self):
+        """Get the name of the default system browser"""
+        # Try to get the default browser name based on the platform
+        if sys.platform == 'darwin':  # macOS
+            # Check if Safari is the default
+            if os.path.exists('/Applications/Safari.app'):
+                return 'Safari'
+        elif sys.platform == 'win32':  # Windows
+            import winreg
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, 
+                                  r'SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice') as key:
+                    browser_reg = winreg.QueryValueEx(key, 'ProgId')[0]
+                    
+                    if 'Chrome' in browser_reg:
+                        return 'Chrome'
+                    elif 'Firefox' in browser_reg:
+                        return 'Firefox'
+                    elif 'Edge' in browser_reg:
+                        return 'Edge'
+                    elif 'Safari' in browser_reg:
+                        return 'Safari'
+                    elif 'Opera' in browser_reg:
+                        return 'Opera'
+            except:
+                pass
+        else:  # Linux
+            # Try to detect the default browser using xdg-settings
+            try:
+                browser = os.popen('xdg-settings get default-web-browser').read().strip()
+                if 'firefox' in browser.lower():
+                    return 'Firefox'
+                elif 'chrome' in browser.lower():
+                    return 'Chrome'
+                elif 'chromium' in browser.lower():
+                    return 'Chromium'
+                elif 'safari' in browser.lower():
+                    return 'Safari'
+                elif 'opera' in browser.lower():
+                    return 'Opera'
+                elif 'edge' in browser.lower():
+                    return 'Edge'
+            except:
+                pass
+            
+            # Alternative method for Linux: check if common browsers are installed
+            browsers_commands = {
+                'firefox': 'Firefox',
+                'google-chrome': 'Chrome',
+                'chromium': 'Chromium',
+                'opera': 'Opera',
+                'microsoft-edge': 'Edge'
+            }
+            
+            for cmd, name in browsers_commands.items():
+                if shutil.which(cmd):
+                    return name
+                
+        return 'System Browser'  # Fallback name if we can't detect the specific browser
+
+    def get_available_browsers(self):
+        """Get list of available browsers on the system"""
+        browsers = {}
+        
+        # Add default browser first
+        default_name = self.get_default_browser_name()
+        browsers[f'{default_name} (Default)'] = ''
+        
+        # Try to detect common browsers
+        try:
+            # Check for Firefox
+            if shutil.which('firefox'):
+                try:
+                    webbrowser.get('firefox')
+                    browsers['Firefox'] = 'firefox'
+                except webbrowser.Error:
+                    pass
+
+            # Check for Chrome
+            chrome_cmd = 'google-chrome' if sys.platform.startswith('linux') else 'chrome'
+            if shutil.which(chrome_cmd):
+                try:
+                    webbrowser.get('chrome')
+                    browsers['Chrome'] = 'chrome'
+                except webbrowser.Error:
+                    pass
+
+            # Check for Chromium on Linux
+            if sys.platform.startswith('linux') and shutil.which('chromium'):
+                try:
+                    webbrowser.get('chromium')
+                    browsers['Chromium'] = 'chromium'
+                except webbrowser.Error:
+                    pass
+
+            # Check for Safari on macOS
+            if sys.platform == 'darwin' and os.path.exists('/Applications/Safari.app'):
+                try:
+                    webbrowser.get('safari')
+                    browsers['Safari'] = 'safari'
+                except webbrowser.Error:
+                    pass
+
+            # Check for Edge
+            edge_cmd = 'microsoft-edge' if sys.platform.startswith('linux') else 'edge'
+            if shutil.which(edge_cmd):
+                try:
+                    webbrowser.get('edge')
+                    browsers['Edge'] = 'edge'
+                except webbrowser.Error:
+                    pass
+
+            # Check for Opera
+            if shutil.which('opera'):
+                try:
+                    webbrowser.get('opera')
+                    browsers['Opera'] = 'opera'
+                except webbrowser.Error:
+                    pass
+
+        except Exception as e:
+            print(f"Error detecting browsers: {e}")
+            
+        return browsers
 
     def initUI(self):
         self.setWindowTitle('Codeforces Problem Finder')
         self.setMinimumSize(800, 600)
 
-        # Set dark mode by defaulthttps://www.w3schools.com/python/python_conditions.asp
+        # Set dark mode by default
         self.apply_dark_mode()
 
         # Main widget and layout
@@ -77,14 +204,34 @@ class CodeforcesApp(QMainWindow):
         self.dark_mode_toggle.stateChanged.connect(self.toggle_dark_mode)
         input_layout.addWidget(self.dark_mode_toggle)
 
-        # Theme selection (new feature)
-        self.theme_combo = QComboBox()
-        self.theme_combo.addItems(["Default", "Light", "Monokai", "Solarized"])
-        self.theme_combo.currentTextChanged.connect(self.change_theme)
-        input_layout.addWidget(QLabel("Theme:"))
-        input_layout.addWidget(self.theme_combo)
-
         layout.addWidget(input_widget)
+
+        # Theme and browser controls
+        controls_widget = QWidget()
+        controls_layout = QHBoxLayout(controls_widget)
+
+        # Theme selection
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(["Dark (Default)", "Light", "Monokai", "Solarized"])
+        self.theme_combo.currentTextChanged.connect(self.change_theme)
+        controls_layout.addWidget(QLabel("Theme:"))
+        controls_layout.addWidget(self.theme_combo)
+
+        # Browser selection
+        controls_layout.addWidget(QLabel("Open in Browser:"))
+        self.browser_combo = QComboBox()
+        self.browser_combo.addItems(self.available_browsers.keys())
+        
+        # Set the previously selected browser if it exists
+        if self.current_browser:
+            index = self.browser_combo.findText(self.current_browser)
+            if index >= 0:
+                self.browser_combo.setCurrentIndex(index)
+        
+        controls_layout.addWidget(self.browser_combo)
+        self.browser_combo.currentTextChanged.connect(self.save_browser_preference)
+
+        layout.addWidget(controls_widget)
 
         # Sorting controls
         sort_widget = QWidget()
@@ -101,7 +248,7 @@ class CodeforcesApp(QMainWindow):
         self.random_button.clicked.connect(self.open_random_problem)
         sort_layout.addWidget(self.random_button)
 
-        # Bookmark button (new feature)
+        # Bookmark button
         self.bookmark_button = QPushButton("Bookmark Problem")
         self.bookmark_button.clicked.connect(self.bookmark_problem)
         sort_layout.addWidget(self.bookmark_button)
@@ -121,9 +268,9 @@ class CodeforcesApp(QMainWindow):
         # Status bar
         self.statusBar().showMessage('Ready')
 
-        # Load bookmarks (new feature)
+        # Load bookmarks
         self.bookmarks = self.load_bookmarks()
-
+    
     def setup_tabs(self):
         # Create tab widget
         self.tab_widget = QTabWidget()
@@ -223,16 +370,53 @@ class CodeforcesApp(QMainWindow):
         
         self.display_problems()
 
+    def save_browser_preference(self):
+        """Save the selected browser to user preferences"""
+        self.current_browser = self.browser_combo.currentText()
+        self.user_preferences['browser'] = self.current_browser
+        self.save_preferences()
+
     def open_problem(self, index):
         row = index.row()
         problem = self.problems[row]
-        webbrowser.open(problem['url'])
+        self.open_in_browser(problem['url'])
 
     def open_random_problem(self):
         if self.problems:
             problem = random.choice(self.problems)
-            webbrowser.open(problem['url'])
+            self.open_in_browser(problem['url'])
 
+    def open_in_browser(self, url):
+        """Open URL in the selected browser"""
+        browser_name = self.browser_combo.currentText()
+        browser_key = self.available_browsers.get(browser_name)
+        
+        try:
+            if browser_key:
+                # Use specific browser
+                try:
+                    browser = webbrowser.get(browser_key)
+                    browser.open(url)
+                except webbrowser.Error:
+                    webbrowser.open(url)  # Fallback to default browser
+            else:
+                # Use system default browser
+                webbrowser.open(url)
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Browser Error",
+                f"Failed to open browser: {str(e)}\nFalling back to default browser."
+            )
+            webbrowser.open(url)
+    
+    def load_preferences(self):
+        try:
+            with open("preferences.json", "r") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return {}
+      
     def change_theme(self, theme):
         if theme == "Light":
             self.apply_light_mode()

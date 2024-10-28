@@ -1,10 +1,12 @@
+import sys
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-                           QLabel, QFrame)
+                           QLabel, QFrame, QScrollArea)
 from PyQt5.QtCore import Qt
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import requests
 from collections import defaultdict
+import numpy as np
 
 class StatsPage(QWidget):
     def __init__(self, parent=None):
@@ -29,14 +31,17 @@ class StatsPage(QWidget):
         
         layout.addLayout(header_layout)
         
-        # Create frames for charts
-        charts_layout = QHBoxLayout()
+        # Create scroll area for charts
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        charts_widget = QWidget()
+        charts_layout = QHBoxLayout(charts_widget)
         
         # Tags pie chart
         tags_frame = QFrame()
         tags_frame.setFrameStyle(QFrame.StyledPanel)
         tags_layout = QVBoxLayout(tags_frame)
-        self.tags_canvas = FigureCanvas(plt.Figure(figsize=(6, 6)))
+        self.tags_canvas = FigureCanvas(plt.Figure(figsize=(8, 8)))
         tags_layout.addWidget(self.tags_canvas)
         charts_layout.addWidget(tags_frame)
         
@@ -44,15 +49,17 @@ class StatsPage(QWidget):
         rating_frame = QFrame()
         rating_frame.setFrameStyle(QFrame.StyledPanel)
         rating_layout = QVBoxLayout(rating_frame)
-        self.rating_canvas = FigureCanvas(plt.Figure(figsize=(8, 6)))
+        self.rating_canvas = FigureCanvas(plt.Figure(figsize=(10, 6)))
         rating_layout.addWidget(self.rating_canvas)
         charts_layout.addWidget(rating_frame)
         
-        layout.addLayout(charts_layout)
+        scroll_area.setWidget(charts_widget)
+        layout.addWidget(scroll_area)
         
         # Stats summary
         self.stats_label = QLabel()
         self.stats_label.setAlignment(Qt.AlignCenter)
+        self.stats_label.setStyleSheet("font-size: 14px; margin: 10px;")
         layout.addWidget(self.stats_label)
         
         self.setLayout(layout)
@@ -86,7 +93,7 @@ class StatsPage(QWidget):
                             if sub['verdict'] == 'OK' and 'rating' in sub['problem']), default=0)
             
             self.stats_label.setText(
-                f"Total Problems Solved: {total_solved}\n"
+                f"Total Problems Solved: {total_solved} | "
                 f"Maximum Rating Solved: {max_rating}"
             )
             
@@ -133,27 +140,83 @@ class StatsPage(QWidget):
         # Clear previous figure
         self.tags_canvas.figure.clear()
         
+        # Create figure with white background
+        self.tags_canvas.figure.set_facecolor('white')
+        
+        # Create gridspec with more space for legend
+        gs = self.tags_canvas.figure.add_gridspec(1, 2, width_ratios=[1, 1.2])
+        
         # Create pie chart
-        ax = self.tags_canvas.figure.add_subplot(111)
+        ax_pie = self.tags_canvas.figure.add_subplot(gs[0])
+        ax_pie.set_facecolor('white')
         
-        # Sort tags by count and take top 10
-        sorted_tags = dict(sorted(tags_data.items(), key=lambda x: x[1], reverse=True)[:10])
+        # Sort tags by count
+        sorted_tags = dict(sorted(tags_data.items(), key=lambda x: x[1], reverse=True))
         
-        ax.pie(sorted_tags.values(), labels=sorted_tags.keys(), autopct='%1.1f%%')
-        ax.set_title("Top 10 Tags Distribution")
+        # Calculate percentages
+        total = sum(sorted_tags.values())
         
+        # Create distinct colors using qualitative colormaps
+        num_tags = len(sorted_tags)
+        if num_tags <= 20:
+            colors = plt.cm.Set3(np.linspace(0, 1, 12))[:num_tags]  # Using Set3 for better visibility
+        else:
+            colors1 = plt.cm.Set3(np.linspace(0, 1, 12))
+            colors2 = plt.cm.Paired(np.linspace(0, 1, 12))
+            colors = np.vstack((colors1, colors2))
+            colors = colors[:num_tags]
+        
+        # Create pie chart without labels
+        ax_pie.pie(sorted_tags.values(),
+                colors=colors,
+                wedgeprops=dict(width=0.6),  # Slightly wider donut
+                labels=["" for _ in sorted_tags])
+                # autopct=lambda pct: f'{pct:.1f}%' if pct > 4 else '')  # Only show percentages > 4%
+        
+        # Add title
+        ax_pie.set_title("Problem Tags Distribution", pad=10, size=12, weight='bold')
+        
+        # Create custom legend
+        ax_legend = self.tags_canvas.figure.add_subplot(gs[1])
+        ax_legend.set_facecolor('white')
+        ax_legend.axis('off')
+        
+        # Create legend entries with more compact format
+        legend_elements = []
+        legend_labels = []
+        for (tag, count), color in zip(sorted_tags.items(), colors):
+            percentage = (count / total) * 100
+            if percentage > 1.0:  # Only show tags with more than 1% representation
+                legend_elements.append(plt.Rectangle((0, 0), 1, 1, fc=color))
+                legend_labels.append(f'{tag} ({count})')  # Simplified legend text
+        
+        # Add legend with better positioning and smaller font
+        ax_legend.legend(legend_elements, legend_labels,
+                        loc='center left',
+                        bbox_to_anchor=(0, 0.5),
+                        frameon=False,
+                        fontsize=8,
+                        ncol=1 if len(legend_labels) > 15 else 2)  # Use 2 columns if fewer items
+        
+        # Adjust layout with more padding
+        self.tags_canvas.figure.tight_layout(pad=1.5)
+        
+        # Draw the updated chart
         self.tags_canvas.draw()
-    
+        
+        
     def update_rating_chart(self, rating_data):
         # Clear previous figure
         self.rating_canvas.figure.clear()
         
-        # Create bar chart
+        # Create figure with white background
+        self.rating_canvas.figure.set_facecolor('white')
         ax = self.rating_canvas.figure.add_subplot(111)
+        ax.set_facecolor('white')
         
         # Create rating ranges from 800 to max rating in steps of 100
         max_rating = max(rating_data.keys()) if rating_data else 3500
-        rating_ranges = range(800, max_rating + 100, 100)
+        rating_ranges = list(range(800, max_rating + 100, 100))
         
         # Group problems into rating ranges
         range_counts = defaultdict(int)
@@ -164,14 +227,40 @@ class StatsPage(QWidget):
         
         # Prepare data for plotting
         heights = [range_counts.get(r, 0) for r in rating_ranges]
-        ax.bar(rating_ranges, heights)
+        
+        # Create gradient colors
+        colors = plt.cm.viridis(np.linspace(0, 0.9, len(rating_ranges)))
+        
+        # Create bars with gradient colors and rounded corners
+        bars = ax.bar(rating_ranges, heights, width=80, color=colors)
+        
+        # Add value labels on top of each bar
+        for bar in bars:
+            height = bar.get_height()
+            if height > 0:  # Only show label if there are problems
+                ax.text(bar.get_x() + bar.get_width()/2., height,
+                       f'{int(height)}',
+                       ha='center', va='bottom')
         
         # Customize the chart
-        ax.set_title("Problems Solved by Rating")
-        ax.set_xlabel("Problem Rating")
-        ax.set_ylabel("Number of Problems")
+        ax.set_title("Problems Solved by Rating", pad=20, size=14, weight='bold')
+        ax.set_xlabel("Problem Rating", size=12)
+        ax.set_ylabel("Number of Problems", size=12)
+        
+        # Rotate x-axis labels for better readability
         ax.tick_params(axis='x', rotation=45)
+        
+        # Add grid for better readability
+        ax.grid(True, axis='y', linestyle='--', alpha=0.3)
+        
+        # Remove top and right spines
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        # Set background color
+        ax.set_facecolor('white')
         
         # Adjust layout to prevent label cutoff
         self.rating_canvas.figure.tight_layout()
+        
         self.rating_canvas.draw()

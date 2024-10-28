@@ -215,18 +215,21 @@ class StatsPage(QWidget):
         ax.set_facecolor('white')
         
         # Create rating ranges from 800 to max rating in steps of 100
-        max_rating = max(rating_data.keys()) if rating_data else 3500
-        rating_ranges = list(range(800, max_rating + 100, 100))
+        max_rating = max(rating_data.keys(), default=3500)  # Using default for Python 3.4+
+        rating_ranges = list(range(800, max_rating + 100, 100))  # Ensure max_rating is included
+        
+        # **Force inclusion of all intermediate ratings by initializing range_counts with all ranges**
+        range_counts = {r: 0 for r in rating_ranges}
         
         # Group problems into rating ranges
-        range_counts = defaultdict(int)
         for rating, count in rating_data.items():
             if rating >= 800:  # Only consider problems rated 800+
                 range_start = (rating // 100) * 100
-                range_counts[range_start] += count
+                if range_start in range_counts:  # Safety check
+                    range_counts[range_start] += count
         
         # Prepare data for plotting
-        heights = [range_counts.get(r, 0) for r in rating_ranges]
+        heights = [range_counts[r] for r in rating_ranges]
         
         # Create gradient colors
         colors = plt.cm.viridis(np.linspace(0, 0.9, len(rating_ranges)))
@@ -235,19 +238,24 @@ class StatsPage(QWidget):
         bars = ax.bar(rating_ranges, heights, width=80, color=colors)
         
         # Add value labels on top of each bar
-        for bar in bars:
-            height = bar.get_height()
+        for bar, height in zip(bars, heights):
             if height > 0:  # Only show label if there are problems
                 ax.text(bar.get_x() + bar.get_width()/2., height,
-                       f'{int(height)}',
-                       ha='center', va='bottom')
+                    f'{int(height)}',
+                    ha='center', va='bottom')
+            # **Optional: Show 0 for empty ranges if desired**
+            # else:
+            #     ax.text(bar.get_x() + bar.get_width()/2., 0,
+            #            '0',
+            #            ha='center', va='bottom')
         
         # Customize the chart
         ax.set_title("Problems Solved by Rating", pad=20, size=14, weight='bold')
         ax.set_xlabel("Problem Rating", size=12)
         ax.set_ylabel("Number of Problems", size=12)
         
-        # Rotate x-axis labels for better readability
+        # Ensure all x-axis labels are shown
+        ax.set_xticks(rating_ranges)
         ax.tick_params(axis='x', rotation=45)
         
         # Add grid for better readability

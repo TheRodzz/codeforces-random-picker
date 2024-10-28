@@ -11,7 +11,7 @@ tmp_ret = collect_all('PyQt5')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 a = Analysis(
-    ['codeforces_finder.py'],  # Your main script name
+    ['main.py'],  
     pathex=[],
     binaries=binaries,
     datas=datas,

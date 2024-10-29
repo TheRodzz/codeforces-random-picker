@@ -6,8 +6,8 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
                            QHeaderView, QMessageBox, QTabWidget)
 from src.data_fetcher import DataFetcher
 from src.stats_page import StatsPage
-from src.utils import get_available_browsers
-from src.preferences import load_preferences, save_preferences, load_bookmarks, save_bookmarks
+from src.utils import (get_available_browsers, load_preferences, save_preferences, 
+                       load_bookmarks, save_bookmarks, get_default_browser_name)
 from src.themes import ThemeManager
 
 class CodeforcesApp(QMainWindow):
@@ -16,7 +16,7 @@ class CodeforcesApp(QMainWindow):
         self.problems = []
         self.user_preferences = load_preferences()
         self.available_browsers = get_available_browsers()
-        self.current_browser = self.user_preferences.get('browser', 'System Default')
+        self.current_browser = self.user_preferences.get('browser', get_default_browser_name())
         self.theme_manager = ThemeManager('Dark (Default)')
         self.initUI()
         self.setup_tabs()

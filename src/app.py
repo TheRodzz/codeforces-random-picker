@@ -1,33 +1,29 @@
 import webbrowser
 import random
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
                            QHBoxLayout, QLabel, QLineEdit, QPushButton, 
                            QSpinBox, QTableWidget, QTableWidgetItem, QComboBox,
-                           QHeaderView, QStyleFactory, QCheckBox, 
-                           QMessageBox, QTabWidget)
+                           QHeaderView, QMessageBox, QTabWidget)
 from src.data_fetcher import DataFetcher
 from src.stats_page import StatsPage
 from src.utils import get_available_browsers
-from src.styles import apply_dark_mode, apply_light_mode, apply_monokai_mode, apply_solarized_mode
 from src.preferences import load_preferences, save_preferences, load_bookmarks, save_bookmarks
+from src.themes import ThemeManager
 
 class CodeforcesApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.problems = []
-        self.dark_mode = True  
         self.user_preferences = load_preferences()
         self.available_browsers = get_available_browsers()
         self.current_browser = self.user_preferences.get('browser', 'System Default')
+        self.theme_manager = ThemeManager('Dark (Default)')
         self.initUI()
         self.setup_tabs()
 
     def initUI(self):
         self.setWindowTitle('Codeforces Problem Finder')
         self.setMinimumSize(800, 600)
-
-        # Set dark mode by default
-        apply_dark_mode()
 
         # Main widget and layout
         main_widget = QWidget()
@@ -69,12 +65,6 @@ class CodeforcesApp(QMainWindow):
         self.fetch_button.clicked.connect(self.fetch_problems)
         input_layout.addWidget(self.fetch_button)
 
-        # Dark mode toggle
-        self.dark_mode_toggle = QCheckBox("Dark Mode")
-        self.dark_mode_toggle.setChecked(self.dark_mode)
-        self.dark_mode_toggle.stateChanged.connect(self.toggle_dark_mode)
-        input_layout.addWidget(self.dark_mode_toggle)
-
         layout.addWidget(input_widget)
 
         # Theme and browser controls
@@ -83,7 +73,7 @@ class CodeforcesApp(QMainWindow):
 
         # Theme selection
         self.theme_combo = QComboBox()
-        self.theme_combo.addItems(["Dark (Default)", "Light", "Monokai", "Solarized"])
+        self.theme_combo.addItems(self.theme_manager.get_theme_names())
         self.theme_combo.currentTextChanged.connect(self.change_theme)
         controls_layout.addWidget(QLabel("Theme:"))
         controls_layout.addWidget(self.theme_combo)
@@ -159,14 +149,6 @@ class CodeforcesApp(QMainWindow):
         
         # Set tab widget as central widget
         self.setCentralWidget(self.tab_widget)
-
-    def toggle_dark_mode(self, state):
-        app = QApplication.instance()
-        if state:
-            apply_dark_mode()
-        else:
-            app.setStyle(QStyleFactory.create("Fusion"))
-            app.setPalette(app.style().standardPalette())
 
     def fetch_problems(self):
         username = self.username_input.text()
@@ -260,14 +242,9 @@ class CodeforcesApp(QMainWindow):
             webbrowser.open(url)
     
     def change_theme(self, theme):
-        if theme == "Light":
-            apply_light_mode()
-        elif theme == "Monokai":
-            apply_monokai_mode()
-        elif theme == "Solarized":
-            apply_solarized_mode()
-        else:
-            apply_dark_mode()
+        self.theme_manager.apply_theme(theme)
+        self.user_preferences['theme'] = theme
+        save_preferences(self.user_preferences)
 
     def bookmark_problem(self):
         row = self.table.currentRow()

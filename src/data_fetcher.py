@@ -1,6 +1,4 @@
-
 from PyQt5.QtCore import QThread, pyqtSignal
-
 import requests
 from collections import Counter
 from statistics import median, stdev
@@ -18,7 +16,7 @@ class DataFetcher(QThread):
         self.contest_limit = contest_limit
         self.tags = tags
         self.recommendation_type = recommendation_type
-        self.CODEFORCES_API_URL='https://codeforces.com/api'
+        self.CODEFORCES_API_URL = 'https://codeforces.com/api'
 
     def run(self):
         try:

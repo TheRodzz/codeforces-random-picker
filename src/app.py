@@ -65,6 +65,15 @@ class CodeforcesApp(QMainWindow):
         self.fetch_button.clicked.connect(self.fetch_problems)
         input_layout.addWidget(self.fetch_button)
 
+        # Recommendation buttons
+        self.practice_recommendation_button = QPushButton("Practice Recommendations")
+        self.practice_recommendation_button.clicked.connect(self.fetch_practice_recommendations)
+        input_layout.addWidget(self.practice_recommendation_button)
+
+        self.warmup_recommendation_button = QPushButton("Warm-Up Recommendations")
+        self.warmup_recommendation_button.clicked.connect(self.fetch_warmup_recommendations)
+        input_layout.addWidget(self.warmup_recommendation_button)
+
         layout.addWidget(input_widget)
 
         # Theme and browser controls
@@ -167,15 +176,56 @@ class CodeforcesApp(QMainWindow):
         self.fetcher.error.connect(self.show_error)
         self.fetcher.start()
 
+    def fetch_practice_recommendations(self):
+        username = self.username_input.text()
+        self.statusBar().showMessage('Fetching practice recommendations...')
+        self.practice_recommendation_button.setEnabled(False)
+        
+        self.fetcher = DataFetcher(
+            username,
+            0,
+            3500,
+            1000,
+            recommendation_type='practice'
+        )
+        self.fetcher.finished.connect(self.update_recommendations)
+        self.fetcher.error.connect(self.show_error)
+        self.fetcher.start()
+
+    def fetch_warmup_recommendations(self):
+        username = self.username_input.text()
+        self.statusBar().showMessage('Fetching warm-up recommendations...')
+        self.warmup_recommendation_button.setEnabled(False)
+        
+        self.fetcher = DataFetcher(
+            username,
+            0,
+            3500,
+            1000,
+            recommendation_type='warmup'
+        )
+        self.fetcher.finished.connect(self.update_recommendations)
+        self.fetcher.error.connect(self.show_error)
+        self.fetcher.start()
+
     def update_problems(self, problems):
         self.problems = problems
         self.display_problems()
         self.fetch_button.setEnabled(True)
         self.statusBar().showMessage(f'Found {len(problems)} problems')
 
+    def update_recommendations(self, problems):
+        self.problems = problems
+        self.display_problems()
+        self.practice_recommendation_button.setEnabled(True)
+        self.warmup_recommendation_button.setEnabled(True)
+        self.statusBar().showMessage(f'Recommended {len(problems)} problems')
+
     def show_error(self, error_message):
         self.statusBar().showMessage(f'Error: {error_message}')
         self.fetch_button.setEnabled(True)
+        self.practice_recommendation_button.setEnabled(True)
+        self.warmup_recommendation_button.setEnabled(True)
 
     def display_problems(self):
         self.table.setRowCount(len(self.problems))

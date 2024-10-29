@@ -1,8 +1,6 @@
 from PyQt5.QtCore import QThread, pyqtSignal
 import requests
-from collections import Counter
-from statistics import median, stdev
-import random
+from src.recommendation import RecommendationEngine
 
 class DataFetcher(QThread):
     finished = pyqtSignal(list)
@@ -55,65 +53,17 @@ class DataFetcher(QThread):
             'url': f"https://codeforces.com/problemset/problem/{problem.get('contestId')}/{problem.get('index')}"
         } for problem in problems_data]
 
-    def analyze_submissions(self, submissions):
-        solved_ratings = []
-        failed_tags = []
-
-        for submission in submissions:
-            problem = submission['problem']
-            tags = problem.get('tags', [])
-            rating = problem.get('rating')
-            verdict = submission['verdict']
-            
-            if verdict == "OK":
-                if rating:
-                    solved_ratings.append(rating)
-            else:
-                failed_tags.extend(tags)
-        
-        return solved_ratings, failed_tags
-
     def get_practice_recommendations(self):
         submissions = self.get_user_submissions()
-        solved_ratings, failed_tags = self.analyze_submissions(submissions)
-
-        if not solved_ratings:
-            raise Exception("Not enough data to determine solved ratings.")
-
-        rating_median = median(solved_ratings)
-        rating_stdev = stdev(solved_ratings) if len(solved_ratings) > 1 else 0
-        target_min = rating_median
-        target_max = rating_median + rating_stdev
-
-        weak_tags = [tag for tag, count in Counter(failed_tags).items() if count > 1]
-        
         all_problems = self.get_unsolved_problems()
-        recommendations = [
-            problem for problem in all_problems
-            if problem.get('rating') and target_min <= problem['rating'] <= target_max
-            and any(tag in weak_tags for tag in problem['tags'])
-        ]
-
-        return random.sample(recommendations, min(10, len(recommendations)))
+        recommendation_engine = RecommendationEngine(submissions, all_problems)
+        return recommendation_engine.get_practice_recommendations()
 
     def get_warmup_recommendations(self):
         submissions = self.get_user_submissions()
-        solved_ratings, _ = self.analyze_submissions(submissions)
-
-        if not solved_ratings:
-            raise Exception("Not enough data to determine solved ratings.")
-
-        rating_median = median(solved_ratings)
-        rating_stdev = stdev(solved_ratings) if len(solved_ratings) > 1 else 0
-        comfort_max = rating_median - rating_stdev
-
         all_problems = self.get_unsolved_problems()
-        recommendations = [
-            problem for problem in all_problems
-            if problem.get('rating') and problem['rating'] <= comfort_max
-        ]
-
-        return random.sample(recommendations, min(10, len(recommendations)))
+        recommendation_engine = RecommendationEngine(submissions, all_problems)
+        return recommendation_engine.get_warmup_recommendations()
 
     def get_problems(self):
         # Get solved problems for the user

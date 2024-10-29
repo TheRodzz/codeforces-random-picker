@@ -9,7 +9,7 @@ from src.stats_page import StatsPage
 from src.utils import (get_available_browsers, load_preferences, save_preferences, 
                        load_bookmarks, save_bookmarks, get_default_browser_name)
 from src.themes import ThemeManager
-from src.problem_recommender import ProblemRecommender
+
 
 class CodeforcesApp(QMainWindow):
     def __init__(self):

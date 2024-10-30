@@ -1,15 +1,14 @@
-import webbrowser
-import random
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
                            QHBoxLayout, QLabel, QLineEdit, QPushButton, 
                            QSpinBox, QTableWidget, QTableWidgetItem, QComboBox,
                            QHeaderView, QMessageBox, QTabWidget)
+from PyQt5.QtCore import Qt
 from src.data_fetcher import DataFetcher
 from src.stats_page import StatsPage
+from src.code_editor import CodeEditor
 from src.utils import (get_available_browsers, load_preferences, save_preferences, 
                        load_bookmarks, save_bookmarks, get_default_browser_name)
 from src.themes import ThemeManager
-
 
 class CodeforcesApp(QMainWindow):
     def __init__(self):
@@ -153,9 +152,13 @@ class CodeforcesApp(QMainWindow):
         # Create stats page
         self.stats_page = StatsPage()
         
+        # Create code editor page
+        self.code_editor = CodeEditor()
+        
         # Add tabs
         self.tab_widget.addTab(self.problem_finder_page, "Problem Finder")
         self.tab_widget.addTab(self.stats_page, "User Stats")
+        self.tab_widget.addTab(self.code_editor, "Code Editor")
         
         # Set tab widget as central widget
         self.setCentralWidget(self.tab_widget)
@@ -304,3 +307,15 @@ class CodeforcesApp(QMainWindow):
             self.bookmarks.append(problem)
             save_bookmarks(self.bookmarks)
             QMessageBox.information(self, "Bookmarked", f"Problem {problem['name']} bookmarked")
+
+            
+# codeforces-random-picker/
+# ├── src/
+# │   ├── codeforces_app.py
+# │   ├── data_fetcher.py
+# │   ├── stats_page.py
+# │   ├── themes.py
+# │   └── utils.py
+# ├── test/
+# │   ├── app-test.py
+# ├── main.py

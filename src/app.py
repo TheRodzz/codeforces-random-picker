@@ -2,13 +2,14 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
                            QHBoxLayout, QLabel, QLineEdit, QPushButton, 
                            QSpinBox, QTableWidget, QTableWidgetItem, QComboBox,
                            QHeaderView, QMessageBox, QTabWidget)
-from PyQt5.QtCore import Qt
 from src.data_fetcher import DataFetcher
 from src.stats_page import StatsPage
-from src.code_editor import CodeEditor
+from src.editor.code_editor import CodeEditor
 from src.utils import (get_available_browsers, load_preferences, save_preferences, 
-                       load_bookmarks, save_bookmarks, get_default_browser_name)
+                       load_bookmarks, save_bookmarks, get_default_browser_name, fetch_test_cases)
 from src.themes import ThemeManager
+import random
+import webbrowser
 
 class CodeforcesApp(QMainWindow):
     def __init__(self):
@@ -114,9 +115,19 @@ class CodeforcesApp(QMainWindow):
         sort_layout.addWidget(self.sort_combo)
 
         # Random problem button
-        self.random_button = QPushButton("Open Random Problem")
-        self.random_button.clicked.connect(self.open_random_problem)
+        self.random_button = QPushButton("Select Random Problem")
+        self.random_button.clicked.connect(self.select_random_problem)
         sort_layout.addWidget(self.random_button)
+
+        # Open selected problem in browser button
+        self.open_in_browser_button = QPushButton("Open Selected Problem in Browser")
+        self.open_in_browser_button.clicked.connect(self.open_selected_problem_in_browser)
+        sort_layout.addWidget(self.open_in_browser_button)
+
+        # Open selected problem in code editor button
+        self.open_in_editor_button = QPushButton("Open Selected Problem in Code Editor")
+        self.open_in_editor_button.clicked.connect(self.open_selected_problem_in_editor)
+        sort_layout.addWidget(self.open_in_editor_button)
 
         # Bookmark button
         self.bookmark_button = QPushButton("Bookmark Problem")
@@ -267,11 +278,30 @@ class CodeforcesApp(QMainWindow):
         problem = self.problems[row]
         self.open_in_browser(problem['url'])
 
-    def open_random_problem(self):
+    def select_random_problem(self):
         if self.problems:
             problem = random.choice(self.problems)
+            self.table.setCurrentCell(self.problems.index(problem), 0)
+            QMessageBox.information(self, "Random Problem", f"Selected problem: {problem['name']}")
+
+    def open_selected_problem_in_browser(self):
+        row = self.table.currentRow()
+        if row != -1:
+            problem = self.problems[row]
             self.open_in_browser(problem['url'])
 
+    def open_selected_problem_in_editor(self):
+        row = self.table.currentRow()
+        if row != -1:
+            problem = self.problems[row]
+            self.tab_widget.setCurrentWidget(self.code_editor)
+            self.code_editor.web_view.page().runJavaScript(
+                f"editor.setValue(`// Problem: {problem['name']}\n// Contest ID: {problem['contestId']}\n// Index: {problem['index']}\n\n`);"
+            )
+            # Fetch and set test cases
+            test_cases = fetch_test_cases(problem['url'])
+            self.code_editor.set_test_cases(test_cases)
+            
     def open_in_browser(self, url):
         browser_name = self.browser_combo.currentText()
         browser_key = self.available_browsers.get(browser_name)
@@ -307,15 +337,3 @@ class CodeforcesApp(QMainWindow):
             self.bookmarks.append(problem)
             save_bookmarks(self.bookmarks)
             QMessageBox.information(self, "Bookmarked", f"Problem {problem['name']} bookmarked")
-
-            
-# codeforces-random-picker/
-# ├── src/
-# │   ├── codeforces_app.py
-# │   ├── data_fetcher.py
-# │   ├── stats_page.py
-# │   ├── themes.py
-# │   └── utils.py
-# ├── test/
-# │   ├── app-test.py
-# ├── main.py

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        html, body, #container {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+    </style>
+    <!-- Add QWebChannel script -->
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body>
+    <div id="container"></div>
+    <script>
+        // Define Monaco loader path with http protocol to avoid CORS
+        const monacoBase = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min';
+        
+        // Load Monaco scripts
+        const script = document.createElement('script');
+        script.src = `${monacoBase}/vs/loader.js`;
+        script.onload = () => {
+            require.config({ paths: { 'vs': `${monacoBase}/vs` }});
+            
+            // Wait for both Monaco and QWebChannel to be ready
+            require(['vs/editor/editor.main'], function() {
+                initializeEditor();
+            });
+        };
+        document.head.appendChild(script);
+
+        function initializeEditor() {
+            // Default language-specific settings
+            const languageDefaults = {
+                'python': '# Your Python code here\n',
+                'cpp': '#include <iostream>\n\nint main() {\n    // Your C++ code here\n    return 0;\n}',
+                'java': 'public class Main {\n    public static void main(String[] args) {\n        // Your Java code here\n    }\n}',
+                'javascript': '// Your JavaScript code here\n'
+            };
+
+            // Create editor instance
+            window.editor = monaco.editor.create(document.getElementById('container'), {
+                value: languageDefaults['python'],
+                language: 'python',
+                theme: 'vs-dark',
+                automaticLayout: true,
+                minimap: {
+                    enabled: true
+                },
+                fontSize: 14,
+                scrollBeyondLastLine: false,
+                renderWhitespace: 'selection',
+                rulers: [80],
+                tabSize: 4,
+                snippetSuggestions: 'top',
+                wordBasedSuggestions: true,
+                quickSuggestions: true,
+                scrollbar: {
+                    vertical: 'visible',
+                    horizontal: 'visible',
+                    useShadows: false,
+                    verticalHasArrows: true,
+                    horizontalHasArrows: true
+                },
+                lineNumbers: true,
+                renderLineHighlight: 'all',
+                matchBrackets: true,
+                autoClosingBrackets: true,
+                autoClosingQuotes: true,
+                autoIndent: true,
+                formatOnPaste: true,
+                formatOnType: true
+            });
+
+            // Set up the web channel
+            new QWebChannel(qt.webChannelTransport, function(channel) {
+                window.pyChannel = channel.objects.bridge;
+            });
+
+            // Auto-save code changes
+            editor.onDidChangeModelContent(function() {
+                if (window.pyChannel) {
+                    window.pyChannel.get_code(editor.getValue());
+                }
+            });
+
+            // Add method to change language
+            window.changeLanguage = function(language) {
+                monaco.editor.setModelLanguage(editor.getModel(), language);
+                if (editor.getValue().trim() === '' || 
+                    Object.values(languageDefaults).includes(editor.getValue())) {
+                    editor.setValue(languageDefaults[language] || '// Your code here\n');
+                }
+            };
+        }
+    </script>
+</body>
+</html>

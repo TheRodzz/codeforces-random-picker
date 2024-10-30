@@ -1,18 +1,32 @@
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QTextEdit, 
-                           QPushButton, QHBoxLayout, QLabel, QPlainTextEdit,
-                           QMessageBox, QComboBox)
-from PyQt5.Qsci import QsciScintilla, QsciLexerPython, QsciLexerCPP
-from PyQt5.QtGui import QColor, QFont
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QPlainTextEdit, QComboBox
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtCore import QUrl, pyqtSlot, QObject
+from PyQt5.QtWebChannel import QWebChannel
+import os
 import subprocess
 import tempfile
-import os
-import sys
+import shutil
 
+class WebChannel(QObject):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+    @pyqtSlot(str, result=str)
+    def get_code(self, code):
+        self.parent().current_code = code
+        return "ok"
 
 class CodeEditor(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.current_code = ""
+        self.current_language = "python"
+        self.language_commands = {
+            "python": ["python", []],
+            "cpp": ["g++", ["-o"]],
+            "java": ["javac", []],
+            "javascript": ["node", []]
+        }
         self.initUI()
         
     def initUI(self):
@@ -22,17 +36,24 @@ class CodeEditor(QWidget):
         lang_layout = QHBoxLayout()
         self.lang_label = QLabel("Language:")
         self.lang_selector = QComboBox()
-        self.lang_selector.addItems(["C++", "Python"])
+        self.lang_selector.addItems(["python", "cpp", "java", "javascript"])
         self.lang_selector.currentTextChanged.connect(self.change_language)
         lang_layout.addWidget(self.lang_label)
         lang_layout.addWidget(self.lang_selector)
         lang_layout.addStretch()
         layout.addLayout(lang_layout)
         
-        # Code Editor
-        self.editor = QsciScintilla()
-        self.setup_editor()
-        layout.addWidget(self.editor)
+        # Create WebEngine View for Monaco Editor
+        self.web_view = QWebEngineView()
+        self.channel = QWebChannel(self)
+        self.channel.registerObject("bridge", WebChannel(self))
+        self.web_view.page().setWebChannel(self.channel)
+        
+        # Load Monaco Editor
+        html_path = os.path.join(os.path.dirname(__file__), 'editor.html')
+        self.web_view.setUrl(QUrl.fromLocalFile(html_path))
+        
+        layout.addWidget(self.web_view)
         
         # Test Case Input and Output
         test_case_layout = QHBoxLayout()
@@ -76,137 +97,133 @@ class CodeEditor(QWidget):
         layout.addWidget(self.run_button)
         
         self.setLayout(layout)
-        
-    def setup_editor(self):
-        # Font
-        font = QFont("Consolas", 11)
-        self.editor.setFont(font)
-        
-        # Margin for line numbers
-        self.editor.setMarginType(0, QsciScintilla.NumberMargin)
-        self.editor.setMarginWidth(0, "0000")
-        self.editor.setMarginsForegroundColor(QColor("#ff888888"))
-        
-        # Indentation
-        self.editor.setIndentationsUseTabs(False)
-        self.editor.setTabWidth(4)
-        self.editor.setAutoIndent(True)
-        self.editor.setBackspaceUnindents(True)
-        
-        # Brace matching
-        self.editor.setBraceMatching(QsciScintilla.SloppyBraceMatch)
-        
-        # Current line highlighting
-        self.editor.setCaretLineVisible(True)
-        self.editor.setCaretLineBackgroundColor(QColor("#1F1F1F"))
-        self.editor.setCaretForegroundColor(QColor("white"))
-        
-        # Set initial lexer
-        self.change_language("C++")
-        
-        # Edge mode shows a line at 80 characters
-        self.editor.setEdgeMode(QsciScintilla.EdgeLine)
-        self.editor.setEdgeColumn(80)
-        self.editor.setEdgeColor(QColor("#FF333333"))
-        
-        # Default style
-        self.editor.setMarginsBackgroundColor(QColor("#FF333333"))
-        self.editor.setMarginsForegroundColor(QColor("#FF999999"))
 
     def change_language(self, language):
-        if language == "C++":
-            lexer = QsciLexerCPP()
-        else:
-            lexer = QsciLexerPython()
-            
-        # Set lexer colors
-        lexer.setDefaultColor(QColor("#F8F8F2"))
-        lexer.setDefaultPaper(QColor("#272822"))
-        lexer.setDefaultFont(QFont("Consolas", 11))
-        
-        self.editor.setLexer(lexer)
-        
+        self.current_language = language
+        self.web_view.page().runJavaScript(f"window.changeLanguage('{language}');")
+    
     def run_code(self):
+        self.web_view.page().runJavaScript(
+            "editor.getValue();",
+            self._handle_code_and_run
+        )
+    
+    def _handle_code_and_run(self, code):
         try:
-            code = self.editor.text()
             input_data = self.input_text.toPlainText()
-            
-            if self.lang_selector.currentText() == "C++":
-                output = self.run_cpp_code(code, input_data)
-            else:
-                output = self.run_python_code(code, input_data)
-                
+            output = self.run_code_with_language(code, input_data)
             self.output_text.setPlainText(output)
-            
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
-            
-    def run_cpp_code(self, code, input_data):
-        with tempfile.NamedTemporaryFile(suffix='.cpp', delete=False) as temp_file:
-            temp_file.write(code.encode('utf-8'))
-            temp_file_path = temp_file.name
-            
+            self.output_text.setPlainText(f"Error: {str(e)}")
+    
+    def run_code_with_language(self, code, input_data):
+        temp_dir = tempfile.mkdtemp()
         try:
-            # Compile the code
-            compile_command = ['g++', temp_file_path, '-o', temp_file_path + '.out']
+            if self.current_language == "python":
+                return self.run_python(code, input_data, temp_dir)
+            elif self.current_language == "cpp":
+                return self.run_cpp(code, input_data, temp_dir)
+            elif self.current_language == "java":
+                return self.run_java(code, input_data, temp_dir)
+            elif self.current_language == "javascript":
+                return self.run_javascript(code, input_data, temp_dir)
+        finally:
+            shutil.rmtree(temp_dir)
+    
+    def run_python(self, code, input_data, temp_dir):
+        file_path = os.path.join(temp_dir, 'script.py')
+        with open(file_path, 'w') as f:
+            f.write(code)
+        
+        try:
+            process = subprocess.run(
+                ['python', file_path],
+                input=input_data,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            return process.stderr if process.stderr else process.stdout
+        except subprocess.TimeoutExpired:
+            return "Error: Program execution timed out (5 seconds)"
+    
+    def run_cpp(self, code, input_data, temp_dir):
+        source_path = os.path.join(temp_dir, 'program.cpp')
+        exe_path = os.path.join(temp_dir, 'program')
+        
+        with open(source_path, 'w') as f:
+            f.write(code)
+        
+        try:
+            # Compile
             compile_process = subprocess.run(
-                compile_command,
+                ['g++', source_path, '-o', exe_path],
                 capture_output=True,
                 text=True
             )
-            
             if compile_process.returncode != 0:
                 return f"Compilation Error:\n{compile_process.stderr}"
-                
-            # Run the compiled code
-            run_command = [temp_file_path + '.out']
+            
+            # Run
             run_process = subprocess.run(
-                run_command,
+                [exe_path],
                 input=input_data,
                 capture_output=True,
                 text=True,
-                timeout=5  # 5 second timeout
+                timeout=5
             )
-            
-            if run_process.stderr:
-                return f"Runtime Error:\n{run_process.stderr}"
-                
-            return run_process.stdout
-            
+            return run_process.stderr if run_process.stderr else run_process.stdout
         except subprocess.TimeoutExpired:
             return "Error: Program execution timed out (5 seconds)"
-        except Exception as e:
-            return f"Error: {str(e)}"
-        finally:
-            # Clean up
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-            if os.path.exists(temp_file_path + '.out'):
-                os.remove(temp_file_path + '.out')
-                
-    def run_python_code(self, code, input_data):
-        with tempfile.NamedTemporaryFile(suffix='.py', delete=False) as temp_file:
-            temp_file.write(code.encode('utf-8'))
-            temp_file_path = temp_file.name
-            
+    
+    def run_java(self, code, input_data, temp_dir):
+        # Extract public class name from code
+        import re
+        class_match = re.search(r'public\s+class\s+(\w+)', code)
+        if not class_match:
+            return "Error: No public class found in Java code"
+        
+        class_name = class_match.group(1)
+        source_path = os.path.join(temp_dir, f'{class_name}.java')
+        
+        with open(source_path, 'w') as f:
+            f.write(code)
+        
         try:
+            # Compile
+            compile_process = subprocess.run(
+                ['javac', source_path],
+                capture_output=True,
+                text=True
+            )
+            if compile_process.returncode != 0:
+                return f"Compilation Error:\n{compile_process.stderr}"
+            
+            # Run
             run_process = subprocess.run(
-                [sys.executable, temp_file_path],
+                ['java', '-cp', temp_dir, class_name],
                 input=input_data,
                 capture_output=True,
                 text=True,
-                timeout=5  # 5 second timeout
+                timeout=5
             )
-            
-            if run_process.stderr:
-                return f"Error:\n{run_process.stderr}"
-                
-            return run_process.stdout
-            
+            return run_process.stderr if run_process.stderr else run_process.stdout
         except subprocess.TimeoutExpired:
             return "Error: Program execution timed out (5 seconds)"
-        except Exception as e:
-            return f"Error: {str(e)}"
-        finally:
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
+    
+    def run_javascript(self, code, input_data, temp_dir):
+        file_path = os.path.join(temp_dir, 'script.js')
+        with open(file_path, 'w') as f:
+            f.write(code)
+        
+        try:
+            process = subprocess.run(
+                ['node', file_path],
+                input=input_data,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            return process.stderr if process.stderr else process.stdout
+        except subprocess.TimeoutExpired:
+            return "Error: Program execution timed out (5 seconds)"

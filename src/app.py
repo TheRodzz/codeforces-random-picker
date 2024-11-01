@@ -298,9 +298,6 @@ class CodeforcesApp(QMainWindow):
             self.code_editor.web_view.page().runJavaScript(
                 f"editor.setValue(`// Problem: {problem['name']}\n// Contest ID: {problem['contestId']}\n// Index: {problem['index']}\n\n`);"
             )
-            # Fetch and set test cases
-            test_cases = fetch_test_cases(problem['url'])
-            self.code_editor.set_test_cases(test_cases)
             
     def open_in_browser(self, url):
         browser_name = self.browser_combo.currentText()

@@ -6,7 +6,7 @@ from src.data_fetcher import DataFetcher
 from src.stats_page import StatsPage
 from src.editor.code_editor import CodeEditor
 from src.utils import (get_available_browsers, load_preferences, save_preferences, 
-                       load_bookmarks, save_bookmarks, get_default_browser_name, fetch_test_cases)
+                       load_bookmarks, save_bookmarks, get_default_browser_name)
 from src.themes import ThemeManager
 import random
 import webbrowser
